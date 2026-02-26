@@ -15,9 +15,30 @@ const today   = () => new Date().toISOString().slice(0,10);
 const fmtKz   = (v) => Math.round(v||0).toLocaleString("pt-PT") + "\u00a0Kz";
 const fmtDate = (d) => d ? new Date(d+"T12:00:00").toLocaleDateString("pt-PT",{day:"2-digit",month:"short",year:"numeric"}) : "";
 
-/* ── STORAGE (persistência local) ── */
-async function stGet(key)      { try { const r = await window.storage.get(key); return r?.value ? JSON.parse(r.value) : null; } catch(_){ return null; } }
-async function stSet(key, val) { try { await window.storage.set(key, JSON.stringify(val)); } catch(_){} }
+/* ── STORAGE ──────────────────────────────────────────────────
+   Usa window.storage no Claude.ai, localStorage noutros browsers
+   (Vercel, Chrome, Safari, etc.) para a configuracao persistir
+--------------------------------------------------------------- */
+const inClaude = typeof window !== "undefined" && typeof window.storage?.get === "function";
+
+async function stGet(key) {
+  try {
+    if (inClaude) {
+      const r = await window.storage.get(key);
+      return r?.value ? JSON.parse(r.value) : null;
+    }
+    const v = localStorage.getItem(key);
+    return v ? JSON.parse(v) : null;
+  } catch(_) { return null; }
+}
+
+async function stSet(key, val) {
+  try {
+    const s = JSON.stringify(val);
+    if (inClaude) { await window.storage.set(key, s); }
+    else          { localStorage.setItem(key, s); }
+  } catch(_) {}
+}
 
 /* ── API CLIENT ──────────────────────────────────────────────────
    Todas as chamadas passam por aqui.
