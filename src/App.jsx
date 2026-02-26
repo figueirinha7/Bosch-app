@@ -1,6 +1,13 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 
+/* ════════════════════════════════════════════════════════════════
+   ⚙️  CONFIGURAÇÃO — altere estas duas linhas antes do deploy
+   Obtenha o API_URL no Passo 2.6 do guia de instalação
+════════════════════════════════════════════════════════════════ */
+const API_URL    = "";  // → cole aqui o URL do Google Apps Script
+const API_SECRET = "";  // → cole aqui a chave secreta (API_SECRET do Code.gs)
+
 /* ── FONTS ── */
 const Fonts = () => <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Nunito:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />;
 
@@ -124,12 +131,12 @@ function printReport(appData, mes, ano) {
   <div class="stat"><div class="sl">Saldo</div><div class="sv ${saldo>=0?'g':'r'}">${fmtR(saldo)}</div></div>
   <div class="stat"><div class="sl">Taxa cobrança</div><div class="sv ${taxaCob>=80?'g':taxaCob>=50?'':'r'}">${taxaCob}%</div></div>
 </div>
-<div style="font-size:11px;color:#8A8278">${pagaram.length} de ${fracoes.length} fracções pagaram · esperado ${fmtR(quotaEsp)}</div>
+<div style="font-size:11px;color:#8A8278">${pagaram.length} de ${fracoes.length} apartamentos pagaram · esperado ${fmtR(quotaEsp)}</div>
 <div class="pb"><div class="pf" style="width:${taxaCob}%;background:${taxaCob>=80?'#1E7A4A':taxaCob>=50?'#C96B15':'#B5341A'}"></div></div>
-${naoPageram.length>0?`<h2>Em Atraso</h2><table><thead><tr><th>Fracção</th><th>Proprietário</th><th>Residente</th></tr></thead><tbody>
+${naoPageram.length>0?`<h2>Em Atraso</h2><table><thead><tr><th>Apartamento</th><th>Proprietário</th><th>Residente</th></tr></thead><tbody>
 ${naoPageram.map(f=>`<tr><td><b>${f.numero}</b></td><td>${f.prop_nome||f.proprietario}</td><td>${f.inq_nome||"—"}</td></tr>`).join("")}
 </tbody></table>`:""}
-${pagaram.length>0?`<h2>Pagamentos Recebidos</h2><table><thead><tr><th>Fracção</th><th>Proprietário</th><th>Data</th><th>Valor</th></tr></thead><tbody>
+${pagaram.length>0?`<h2>Pagamentos Recebidos</h2><table><thead><tr><th>Apartamento</th><th>Proprietário</th><th>Data</th><th>Valor</th></tr></thead><tbody>
 ${pagaram.map(f=>{const p=pqMes.find(x=>x.fracaoId===f.id);return`<tr><td><b>${f.numero}</b></td><td>${f.prop_nome||f.proprietario}</td><td>${fmtDate(p?.data)}</td><td><b>${fmtR(p?.valor)}</b></td></tr>`;}).join("")}
 </tbody></table>`:""}
 ${despMes.length>0?`<h2>Despesas</h2><table><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Valor</th></tr></thead><tbody>
@@ -327,7 +334,7 @@ function useAppData(apiUrl) {
       // Vai à API
       const fresh = await apiGet(apiUrl);
       if (!fresh.ok) throw new Error(fresh.error || "Erro na API");
-      // Normaliza IDs: usa indice baseado em número de fracção
+      // Normaliza IDs: usa indice baseado em número de apartamento
       const numToId = {};
       fresh.fracoes.forEach(f => { numToId[f.numero] = f.id; });
       // Re-mapeia fracaoId nos pagamentos (a API já faz, mas garantimos)
@@ -385,10 +392,6 @@ function PublicView({appData, onGestor, apiUrl}) {
               <div className="hide-sm" style={{fontSize:11,color:"#8A8278",marginTop:2}}>{endereco}</div>
             </div>
             <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              <button onClick={shareWA} className="wa-btn">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>
-                Partilhar
-              </button>
               <button onClick={onGestor} className="btn btn-outline btn-sm">🔐 Gestores</button>
             </div>
           </div>
@@ -404,14 +407,14 @@ function PublicView({appData, onGestor, apiUrl}) {
           <div style={{fontSize:12,opacity:.6,marginBottom:20}}>{endereco}</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
             {[
-              {l:"Em atraso", v:`${devedores.length} / ${fracoes.length}`, s:"fracções"},
+              {l:"Em atraso", v:`${devedores.length} / ${fracoes.length}`, s:"apartamentos"},
               {l:"Total em dívida", v:fmtKz(totalDivida), s:"quotas mensais"},
-              {l:"Actualizado", v:new Date().toLocaleDateString("pt-PT",{day:"2-digit",month:"short"}), s:new Date().getFullYear()},
+              {l:"Actualizado", v:new Date().toLocaleDateString("pt-PT",{day:"2-digit",month:"short"}), s:new Date().getFullYear(), small:true},
             ].map((s,i)=>(
-              <div key={i} style={{background:"#ffffff15",borderRadius:10,padding:"12px 14px"}}>
-                <div style={{fontSize:11,opacity:.7,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>{s.l}</div>
-                <div className="mono" style={{fontSize:15,fontWeight:700}}>{s.v}</div>
-                <div style={{fontSize:11,opacity:.5,marginTop:2}}>{s.s}</div>
+              <div key={i} style={{background:"#ffffff15",borderRadius:10,padding:s.small?"6px 10px":"12px 14px",opacity:s.small?.75:1}}>
+                <div style={{fontSize:s.small?8:11,opacity:.7,textTransform:"uppercase",letterSpacing:.5,marginBottom:s.small?1:4}}>{s.l}</div>
+                <div className="mono" style={{fontSize:s.small?11:15,fontWeight:700}}>{s.v}</div>
+                <div style={{fontSize:s.small?9:11,opacity:.5,marginTop:2}}>{s.s}</div>
               </div>
             ))}
           </div>
@@ -430,7 +433,7 @@ function PublicView({appData, onGestor, apiUrl}) {
           {devedores.length===0 ? (
             <div style={{textAlign:"center",padding:"28px 0",color:"#1E7A4A"}}>
               <div style={{fontSize:32,marginBottom:8}}>✅</div>
-              <div style={{fontWeight:600}}>Todas as fracções em dia!</div>
+              <div style={{fontWeight:600}}>Todos os apartamentos em dia!</div>
             </div>
           ) : (
             <>
@@ -489,7 +492,7 @@ function PublicView({appData, onGestor, apiUrl}) {
                         <div style={{fontSize:12,color:"#8A8278"}}>{c.descricao}</div>
                       </div>
                       <div style={{textAlign:"right",flexShrink:0}}>
-                        <div className="mono" style={{fontWeight:700,fontSize:14}}>{fmtKz(c.valorPorFracao)}<span style={{fontSize:11,color:"#8A8278"}}>/fracção</span></div>
+                        <div className="mono" style={{fontWeight:700,fontSize:14}}>{fmtKz(c.valorPorFracao)}<span style={{fontSize:11,color:"#8A8278"}}>/apartamento</span></div>
                         <div style={{fontSize:11,color:vencido?"#B5341A":"#8A8278"}}>
                           {vencido?"⚠ Vencido: ":"Prazo: "}{fmtDate(c.dataVencimento)}
                         </div>
@@ -612,7 +615,7 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
 
   const TT=({active,payload,label})=>{if(!active||!payload?.length)return null;return<div style={{background:"#fff",border:"1px solid #E2DDD6",borderRadius:8,padding:"10px 14px"}}><div style={{fontSize:12,color:"#8A8278",marginBottom:6}}>{label}</div>{payload.map((p,i)=><div key={i} className="mono" style={{fontSize:13,color:p.color}}>{p.name}: {fmtKz(p.value)}</div>)}</div>};
 
-  const TABS=[["dashboard","📊 Dashboard"],["fracoes","🏠 Fracções"],["quotas","💳 Quotas"],["contribuicoes","📋 Contribuições"],["despesas","🧾 Despesas"]];
+  const TABS=[["dashboard","📊 Dashboard"],["fracoes","🏠 Apartamentos"],["quotas","💳 Quotas"],["contribuicoes","📋 Contribuições"],["despesas","🧾 Despesas"]];
 
   return (
     <div style={{minHeight:"100vh",background:"#F5F3EF"}}>
@@ -623,9 +626,15 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
             <span className="tag tag-blue">Gestor</span>
             {loading && <span className="spinner"/>}
           </div>
-          <div style={{display:"flex",gap:2,flexWrap:"wrap"}}>
+          <div style={{display:"flex",gap:2,flexWrap:"wrap",alignItems:"center"}}>
             {TABS.map(([k,l])=><button key={k} className={`nav-pill${tab===k?" on":""}`} onClick={()=>setTab(k)}>{l}</button>)}
             <button className="btn btn-outline btn-sm" onClick={onReload} style={{marginLeft:4}}>↻</button>
+            <button onClick={()=>{ const u=window.location.href; const msg=`🏢 *${config.predio}*
+📋 Consulte o estado do condomínio:
+${u}`; window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,'_blank'); }} className="wa-btn" style={{padding:"6px 12px",fontSize:12}}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>
+              Partilhar
+            </button>
             <button className="btn btn-ghost btn-sm" onClick={onBack}>← Sair</button>
           </div>
         </div>
@@ -690,8 +699,8 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
         {/* ── FRACÇÕES ── */}
         {tab==="fracoes" && <>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-            <span className="section-hd">Fracções</span>
-            <button className="btn btn-red" onClick={()=>om("fracao")}>+ Nova Fracção</button>
+            <span className="section-hd">Apartamentos</span>
+            <button className="btn btn-red" onClick={()=>om("fracao")}>+ Novo Apartamento</button>
           </div>
           <div className="card">
             <table><thead><tr><th>Nº</th><th>Proprietário</th><th>Telefone</th><th>Inquilino</th><th>Tel. Inquilino</th><th>Pago</th><th>Dívida</th><th>Estado</th></tr></thead>
@@ -718,7 +727,7 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
             <button className="btn btn-red" onClick={()=>om("pagQuota")}>+ Registar</button>
           </div>
           <div className="card">
-            <table><thead><tr><th>Data</th><th>Fracção</th><th>Proprietário</th><th>Mês</th><th>Valor</th><th>Método</th></tr></thead>
+            <table><thead><tr><th>Data</th><th>Apartamento</th><th>Proprietário</th><th>Mês</th><th>Valor</th><th>Método</th></tr></thead>
             <tbody>{[...pagamentosQuota].sort((a,b)=>(b.data||"").localeCompare(a.data||"")).map(p=>{
               const f=fracoes.find(x=>x.id===p.fracaoId);
               return <tr key={p.id}>
@@ -748,9 +757,9 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
               return <div key={c.id} className="card">
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12,flexWrap:"wrap",gap:8}}>
                   <div><div style={{fontWeight:700,fontSize:15}}>{c.titulo}</div><div style={{fontSize:12,color:"#8A8278",marginTop:3}}>{c.descricao} · Prazo: {fmtDate(c.dataVencimento)}</div></div>
-                  <span className="mono" style={{fontWeight:700,color:"#B5341A"}}>{fmtKz(c.valorPorFracao)}/frac.</span>
+                  <span className="mono" style={{fontWeight:700,color:"#B5341A"}}>{fmtKz(c.valorPorFracao)}/apto.</span>
                 </div>
-                {pcs.length>0&&<table><thead><tr><th>Data</th><th>Fracção</th><th>Proprietário</th><th>Valor</th></tr></thead>
+                {pcs.length>0&&<table><thead><tr><th>Data</th><th>Apartamento</th><th>Proprietário</th><th>Valor</th></tr></thead>
                 <tbody>{pcs.map(p=>{const f=fracoes.find(x=>x.id===p.fracaoId);return<tr key={p.id}>
                   <td style={{fontSize:12,color:"#8A8278"}}>{fmtDate(p.data)}</td>
                   <td><span className="serif" style={{fontWeight:700,color:"#B5341A"}}>{f?.numero}</span></td>
@@ -785,7 +794,7 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
       </div>
 
       {/* ── MODALS ── */}
-      {modal==="fracao" && <Modal title="Nova Fracção" onClose={cm}>
+      {modal==="fracao" && <Modal title="Novo Apartamento" onClose={cm}>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
             <FG label="Número *"><input className="input" placeholder="ex: 101" value={form.numero||""} onChange={e=>sf("numero")(e.target.value)}/></FG>
@@ -811,7 +820,7 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
 
       {modal==="pagQuota" && <Modal title="Registar Pagamento de Quota" onClose={cm}>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <FG label="Fracção">
+          <FG label="Apartamento">
             <select className="input" value={form.fracaoNum||""} onChange={e=>sf("fracaoNum")(e.target.value)}>
               <option value="">Seleccione...</option>
               {fracoes.map(f=><option key={f.id} value={f.numero}>{f.numero} — {f.prop_nome||f.proprietario}</option>)}
@@ -853,7 +862,7 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <FG label="Título"><input className="input" value={form.titulo||""} onChange={e=>sf("titulo")(e.target.value)}/></FG>
           <FG label="Descrição"><input className="input" value={form.descricao||""} onChange={e=>sf("descricao")(e.target.value)}/></FG>
-          <FG label="Valor por fracção (Kz)"><input className="input" type="number" value={form.valorPorFracao||""} onChange={e=>sf("valorPorFracao")(e.target.value)}/></FG>
+          <FG label="Valor por apartamento (Kz)"><input className="input" type="number" value={form.valorPorFracao||""} onChange={e=>sf("valorPorFracao")(e.target.value)}/></FG>
           <FG label="Data Limite"><input className="input" type="date" value={form.dataVencimento||""} onChange={e=>sf("dataVencimento")(e.target.value)}/></FG>
           <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:8}}>
             <button className="btn btn-outline" onClick={cm}>Cancelar</button>
@@ -867,7 +876,7 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
       {modal==="pagContrib" && <Modal title="Registar Pagamento de Contribuição" onClose={cm}>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <FG label="Contribuição"><select className="input" value={form.contribTitulo||""} onChange={e=>sf("contribTitulo")(e.target.value)}><option value="">Seleccione...</option>{contribuicoes.map(c=><option key={c.id} value={c.titulo}>{c.titulo}</option>)}</select></FG>
-          <FG label="Fracção"><select className="input" value={form.fracaoNum||""} onChange={e=>sf("fracaoNum")(e.target.value)}><option value="">Seleccione...</option>{fracoes.map(f=><option key={f.id} value={f.numero}>{f.numero} — {f.prop_nome||f.proprietario}</option>)}</select></FG>
+          <FG label="Apartamento"><select className="input" value={form.fracaoNum||""} onChange={e=>sf("fracaoNum")(e.target.value)}><option value="">Seleccione...</option>{fracoes.map(f=><option key={f.id} value={f.numero}>{f.numero} — {f.prop_nome||f.proprietario}</option>)}</select></FG>
           <FG label="Data"><input className="input" type="date" value={form.data||""} onChange={e=>sf("data")(e.target.value)}/></FG>
           <FG label="Valor (Kz)"><input className="input" type="number" value={form.valor||""} onChange={e=>sf("valor")(e.target.value)}/></FG>
           <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:8}}>
@@ -886,19 +895,13 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
    ROOT APP
 ════════════════════════════════════════════════════════════════ */
 export default function App() {
-  const [cfg, setCfg]   = useState(null);  // { apiUrl, apiSecret }
-  const [cfgReady, setCfgReady] = useState(false);
+  // Usa as constantes do topo do ficheiro.
+  // Se estiver vazio, mostra o ecrã de configuração (util para testes).
+  const [cfg, setCfg] = useState(
+    API_URL ? { apiUrl: API_URL, apiSecret: API_SECRET } : null
+  );
   const [view, setView] = useState("public");
   const [auth, setAuth] = useState(false);
-
-  // Carrega configuração guardada
-  useEffect(()=>{
-    (async()=>{
-      const saved = await stGet("condo_cfg");
-      if (saved?.apiUrl) setCfg(saved);
-      setCfgReady(true);
-    })();
-  },[]);
 
   const saveCfg = async (newCfg) => {
     await stSet("condo_cfg", newCfg);
@@ -906,12 +909,6 @@ export default function App() {
   };
 
   const { data, loading, error, reload } = useAppData(cfg?.apiUrl || "");
-
-  if (!cfgReady) return (
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#F5F3EF",fontFamily:"Nunito,sans-serif",color:"#8A8278",animation:"pulse 1.5s infinite"}}>
-      A carregar…
-    </div>
-  );
 
   if (!cfg?.apiUrl) return (
     <>
