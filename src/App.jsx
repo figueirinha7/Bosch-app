@@ -5,7 +5,7 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, R
    ⚙️  CONFIGURAÇÃO — altere estas duas linhas antes do deploy
    Obtenha o API_URL no Passo 2.6 do guia de instalação
 ════════════════════════════════════════════════════════════════ */
-const API_URL    = "https://script.google.com/macros/s/AKfycbxmW0Jv1SEPw29ZKK36jtPiDvNL4YKM8Y8RhwsxN1qVvr53I2SDuPjYz_QP7moTtDTX3w/exec";  // → cole aqui o URL do Google Apps Script
+const API_URL    = "https://script.google.com/macros/s/AKfycbyzZxfeAjXlGy2KTwlV3x8tAtD_oTfFyM7ELOh_gupMDz44Elz-qY3Mnq0tCmS_K8tXeA/exec";  // → cole aqui o URL do Google Apps Script
 const API_SECRET = "12345678";  // → cole aqui a chave secreta (API_SECRET do Code.gs)
 
 /* ── FONTS ── */
