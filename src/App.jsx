@@ -4,8 +4,8 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, R
 /* ════════════════════════════════════════════════════════════════
    ⚙️  CONFIGURAÇÃO — altere estas duas linhas antes do deploy
 ════════════════════════════════════════════════════════════════ */
-const API_URL    = "";
-const API_SECRET = "";
+const API_URL    = "https://script.google.com/macros/s/AKfycbwQOAy15QrNW9l_hMV9ICakPt0nvrmCEGnbWAB7ciCljZ8b_Ahks2wOP4svPdZ4_kJtDg/exec";
+const API_SECRET = "12345678";
 
 /* ── FONTS ── */
 const Fonts = () => <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Nunito:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />;
@@ -435,7 +435,6 @@ function PublicView({appData, onGestor}) {
                 <span className="section-hd">Taxas em Atraso</span>
                 {devedores.length>0&&<span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:"50%",background:"#B5341A",color:"#fff",fontSize:11,fontWeight:700}}>{devedores.length}</span>}
               </div>
-              <button onClick={shareWA} className="wa-btn" style={{padding:"7px 12px",fontSize:12}}><WaSvg s={13}/>Partilhar</button>
             </div>
             {devedores.length===0?(
               <div style={{textAlign:"center",padding:"28px 0",color:"#1E7A4A"}}><div style={{fontSize:32,marginBottom:8}}>✅</div><div style={{fontWeight:600}}>Todos os apartamentos em dia!</div></div>
