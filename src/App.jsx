@@ -74,13 +74,16 @@ function quotaInfo(fracaoId, pags, quotaMensal, anoBase, mesBase) {
 }
 
 function contribInfo(c, fId, pagsCont) {
-  const pags  = pagsCont.filter(p=>p.contribuicaoId===c.id && p.fracaoId===fId);
-  const total = pags.reduce((s,p)=>s+p.valor,0);
+  const pags     = pagsCont.filter(p=>p.contribuicaoId===c.id && p.fracaoId===fId);
+  const total    = pags.reduce((s,p)=>s+p.valor,0);
   const excluido = (c.excluidos||[]).includes(fId);
-  const isLivre  = !c.valorPorFracao && !c.valorTotal; // arrecadação livre
+  const vpf      = parseFloat(c.valorPorFracao) || 0;   // valor por fracção
+  const vt       = parseFloat(c.valorTotal)     || 0;   // valor total
+  const isLivre  = vpf === 0 && vt === 0;               // arrecadação livre
   if (isLivre || excluido) return { totalPago:total, divida:0, pago:true, excluido, isLivre };
-  const meta = c.valorPorFracao || 0;
-  return { totalPago:total, divida:Math.max(0,meta-total), pago:total>=meta&&meta>0, excluido:false, isLivre:false };
+  // Dívida por apartamento: usa sempre valorPorFracao (quando definido)
+  const divida = vpf > 0 ? Math.max(0, vpf - total) : 0;
+  return { totalPago:total, divida, pago: vpf > 0 ? total >= vpf : total > 0, excluido:false, isLivre:false };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -480,10 +483,16 @@ function PublicView({appData, onGestor}) {
             ):(
               <div style={{display:"flex",flexDirection:"column",gap:14}}>
                 {contribStatus.map(c=>{
-                  const isLivre = !c.valorPorFracao && !c.valorTotal;
-                  const meta    = c.valorTotal || (c.valorPorFracao * c.apts.filter(f=>!f.excluido).length);
-                  const pct     = meta>0?Math.min(100,Math.round((c.totalCob/meta)*100)):0;
-                  const devedoresC = c.apts.filter(f=>f.divida>0&&!f.excluido&&!isLivre);
+                  const vpf      = parseFloat(c.valorPorFracao) || 0;
+                  const vt       = parseFloat(c.valorTotal)     || 0;
+                  const isLivre  = vpf === 0 && vt === 0;
+                  // % baseada em valorTotal se definido; senão em valorPorFracao × nApts
+                  const meta     = vt > 0 ? vt : (vpf * c.apts.filter(f=>!f.excluido).length);
+                  const pct      = meta>0 ? Math.min(100,Math.round((c.totalCob/meta)*100)) : 0;
+                  // Devedores: apartamentos que ainda não pagaram o valorPorFracao
+                  const devedoresC = (!isLivre && vpf > 0)
+                    ? c.apts.filter(f=>f.divida>0 && !f.excluido)
+                    : [];
                   const vencido = c.dataVencimento && c.dataVencimento<today();
                   return (
                     <div key={c.id} className="card">
