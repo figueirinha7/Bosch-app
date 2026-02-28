@@ -505,16 +505,18 @@ function PublicView({appData, onGestor}) {
                           )}
                         </div>
                       </div>
+                      {/* Barra de progresso — apenas quando há meta definida */}
                       {!isLivre&&meta>0&&(
                         <div style={{marginBottom:12}}>
                           <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#8A8278",marginBottom:5}}>
-                            <span>{c.apts.filter(f=>f.pago&&!f.excluido).length} de {c.apts.filter(f=>!f.excluido).length} pagaram</span>
-                            <span className="mono">{pct}%</span>
+                            <span className="mono">{fmtKz(c.totalCob)} de {fmtKz(meta)}</span>
+                            <span className="mono" style={{fontWeight:700,color:pct>=80?"#1E7A4A":pct>=50?"#C96B15":"#B5341A"}}>{pct}%</span>
                           </div>
                           <div className="progress-bg"><div className="progress-fill" style={{width:`${pct}%`,background:pct>=80?"#1E7A4A":pct>=50?"#C96B15":"#B5341A"}}/></div>
                         </div>
                       )}
-                      {devedoresC.length>0&&(
+                      {/* Devedores (contribuições com valor fixo) */}
+                      {!isLivre&&devedoresC.length>0&&(
                         <div style={{display:"flex",flexDirection:"column",gap:5}}>
                           {devedoresC.map(f=>(
                             <div key={f.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"#FBF9F7",borderRadius:8}}>
@@ -528,6 +530,23 @@ function PublicView({appData, onGestor}) {
                           ))}
                         </div>
                       )}
+                      {/* Contribuidores (arrecadação livre — mostra quem pagou) */}
+                      {isLivre&&(()=>{
+                        const contrib = c.apts.filter(f=>f.totalPago>0).sort((a,b)=>b.totalPago-a.totalPago);
+                        if(contrib.length===0) return <div style={{fontSize:12,color:"#C5C0B8",textAlign:"center",padding:"8px 0"}}>Ainda sem contribuições registadas.</div>;
+                        return <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                          {contrib.map(f=>(
+                            <div key={f.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 10px",background:"#EBF7F1",borderRadius:8}}>
+                              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                <span className="serif" style={{fontWeight:700,color:"#1E7A4A",fontSize:13}}>{f.numero}</span>
+                                <div><div style={{fontSize:13}}>{f.prop_nome||f.proprietario}</div>
+                                {f.inq_nome&&<div style={{fontSize:11,color:"#1A4F8B"}}>Inquilino: {f.inq_nome}</div>}</div>
+                              </div>
+                              <span className="mono" style={{fontSize:13,color:"#1E7A4A",fontWeight:700}}>{fmtKz(f.totalPago)}</span>
+                            </div>
+                          ))}
+                        </div>;
+                      })()}
                     </div>
                   );
                 })}
