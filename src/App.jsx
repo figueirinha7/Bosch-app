@@ -60,14 +60,17 @@ function quotaInfo(fracaoId, pags, quotaMensal, anoBase, mesBase) {
   while (y < ny || (y===ny && m<=nm)) {
     const key = `${y}-${pad2(m)}`;
     const pagMes = pags.filter(p=>p.fracaoId===fracaoId && p.mes===m && p.ano===y);
-    const pagTotal = pagMes.reduce((s,p)=>s+p.valor,0);
-    if (pagTotal < quotaMensal) mesesEmFalta.push({mes:m, ano:y, pago:pagTotal, emFalta:quotaMensal-pagTotal, key});
+    // Mês isento: existe um registo com metodo="Isento" para este mês
+    const isento = pagMes.some(p=>p.metodo==="Isento");
+    if (!isento) {
+      const pagTotal = pagMes.filter(p=>p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
+      if (pagTotal < quotaMensal) mesesEmFalta.push({mes:m, ano:y, pago:pagTotal, emFalta:quotaMensal-pagTotal, key});
+    }
     m++; if(m>12){m=1;y++;}
   }
-  const totalPago = pags.filter(p=>p.fracaoId===fracaoId).reduce((s,p)=>s+p.valor,0);
-  const mesesTotal= mesesEmFalta.length + pags.filter(p=>p.fracaoId===fracaoId&&p.valor>=quotaMensal).length;
+  const totalPago = pags.filter(p=>p.fracaoId===fracaoId&&p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
   const divida    = mesesEmFalta.reduce((s,x)=>s+x.emFalta,0);
-  return { totalPago, divida, mesesAtraso:mesesEmFalta.length, mesesEmFalta, mesesTotal };
+  return { totalPago, divida, mesesAtraso:mesesEmFalta.length, mesesEmFalta };
 }
 
 function contribInfo(c, fId, pagsCont) {
@@ -430,11 +433,9 @@ function PublicView({appData, onGestor}) {
         {/* ── QUOTAS TAB ── */}
         {tab==="quotas" && (
           <div className="anim card">
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span className="section-hd">Taxas em Atraso</span>
-                {devedores.length>0&&<span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:"50%",background:"#B5341A",color:"#fff",fontSize:11,fontWeight:700}}>{devedores.length}</span>}
-              </div>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+              <span className="section-hd">Taxas em Atraso</span>
+              {devedores.length>0&&<span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:"50%",background:"#B5341A",color:"#fff",fontSize:11,fontWeight:700}}>{devedores.length}</span>}
             </div>
             {devedores.length===0?(
               <div style={{textAlign:"center",padding:"28px 0",color:"#1E7A4A"}}><div style={{fontSize:32,marginBottom:8}}>✅</div><div style={{fontWeight:600}}>Todos os apartamentos em dia!</div></div>
@@ -494,7 +495,11 @@ function PublicView({appData, onGestor}) {
                         </div>
                         <div style={{textAlign:"right",flexShrink:0}}>
                           {isLivre?(
-                            <span className="tag tag-teal">Arrecadação livre</span>
+                            <div>
+                              <span className="tag tag-teal" style={{marginBottom:4,display:"inline-block"}}>Arrecadação livre</span>
+                              <div className="mono" style={{fontWeight:700,fontSize:14,color:"#1E7A4A"}}>{fmtKz(c.totalCob)}</div>
+                              <div style={{fontSize:11,color:"#8A8278"}}>recebido</div>
+                            </div>
                           ):(
                             <div className="mono" style={{fontWeight:700,fontSize:14,color:"#B5341A"}}>{fmtKz(c.totalCob)}<span style={{fontSize:11,color:"#8A8278"}}> / {fmtKz(meta)}</span></div>
                           )}
@@ -702,18 +707,24 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
   return (
     <div style={{minHeight:"100vh",background:"#F5F3EF"}}>
       <div style={{background:"#fff",borderBottom:"1px solid #E2DDD6",position:"sticky",top:0,zIndex:50}}>
-        <div style={{maxWidth:1100,margin:"0 auto",padding:"0 16px",display:"flex",alignItems:"center",justifyContent:"space-between",height:58}}>
-          <div style={{display:"flex",alignItems:"center",gap:12}}>
-            <span className="serif" style={{fontSize:17,fontWeight:700,color:"#B5341A"}}>{config.predio}</span>
-            <span className="tag tag-blue">Gestor</span>
-            {loading&&<span className="spinner"/>}
+        <div style={{maxWidth:1100,margin:"0 auto",padding:"0 16px"}}>
+          {/* Linha 1: nome + acções */}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",height:50,gap:8}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,minWidth:0}}>
+              <span className="serif" style={{fontSize:16,fontWeight:700,color:"#B5341A",whiteSpace:"nowrap"}}>{config.predio}</span>
+              <span className="tag tag-blue">Gestor</span>
+              {loading&&<span className="spinner"/>}
+            </div>
+            <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+              <button className="btn btn-outline btn-sm" onClick={onReload} title="Actualizar">↻</button>
+              <button onClick={()=>{const u=window.location.href;const msg=`🏢 *${config.predio}*\n📋 Consulte o estado do condomínio:\n${u}`;window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,"_blank");}} className="wa-btn" style={{padding:"6px 10px",fontSize:12}}><WaSvg s={13}/>Partilhar</button>
+              <button className="btn btn-ghost btn-sm" title="Reconfigurar" onClick={()=>{if(window.confirm("Reconfigurar URL e chave da API?"))window.location.href=window.location.pathname+"?setup";}}>⚙️</button>
+              <button className="btn btn-ghost btn-sm" onClick={onBack}>← Sair</button>
+            </div>
           </div>
-          <div style={{display:"flex",gap:2,flexWrap:"wrap",alignItems:"center"}}>
-            {TABS.map(([k,l])=><button key={k} className={`nav-pill${tab===k?" on":""}`} onClick={()=>setTab(k)}>{l}</button>)}
-            <button className="btn btn-outline btn-sm" onClick={onReload} style={{marginLeft:4}}>↻</button>
-            <button onClick={()=>{const u=window.location.href;const msg=`🏢 *${config.predio}*\n📋 Consulte o estado do condomínio:\n${u}`;window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`,"_blank");}} className="wa-btn" style={{padding:"6px 12px",fontSize:12}}><WaSvg s={13}/>Partilhar</button>
-            <button className="btn btn-ghost btn-sm" onClick={()=>{if(window.confirm("Reconfigurar URL e chave da API?"))window.location.href=window.location.pathname+"?setup";}}>⚙️</button>
-            <button className="btn btn-ghost btn-sm" onClick={onBack}>← Sair</button>
+          {/* Linha 2: tabs */}
+          <div style={{display:"flex",gap:2,overflowX:"auto",paddingBottom:6,scrollbarWidth:"none"}}>
+            {TABS.map(([k,l])=><button key={k} className={`nav-pill${tab===k?" on":""}`} onClick={()=>setTab(k)} style={{whiteSpace:"nowrap"}}>{l}</button>)}
           </div>
         </div>
       </div>
@@ -807,9 +818,12 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
 
         {/* ── QUOTAS ── */}
         {tab==="quotas"&&<>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
             <span className="section-hd">Pagamentos de Quotas</span>
-            <button className="btn btn-red" onClick={()=>om("pagQuota")}>+ Registar</button>
+            <div style={{display:"flex",gap:8}}>
+              <button className="btn btn-outline" onClick={()=>om("isentarMes")}>🚫 Isentar Mês</button>
+              <button className="btn btn-red" onClick={()=>om("pagQuota")}>+ Registar</button>
+            </div>
           </div>
           <div className="card">
             <table><thead><tr><th>Data</th><th>Apt.</th><th>Proprietário</th><th>Mês</th><th>Valor</th><th>Método</th></tr></thead>
@@ -982,6 +996,30 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
             <button className="btn btn-outline" onClick={cm}>Cancelar</button>
             <button className="btn btn-red" disabled={saving} onClick={()=>post("add_pagamento_quota",{fracao_numero:form.fracaoNum,data:form.data,valor:+form.valor||quotaMensal,mes:+form.mes,ano:+form.ano,metodo:form.metodo||""})}>
               {saving?<span className="spinner"/>:"Registar"}
+            </button>
+          </div>
+        </div>
+      </Modal>}
+
+      {/* ── ISENTAR MÊS DE QUOTA ── */}
+      {modal==="isentarMes"&&<Modal title="🚫 Isentar Mês de Quota" onClose={cm}>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{background:"#EBF1FA",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#1A4F8B"}}>
+            O apartamento ficará isento da quota neste mês — não aparecerá como devedor.<br/>
+            Pode usar isto para acordos em que um valor anterior abona uma quota futura.
+          </div>
+          <FG label="Apartamento"><select className="input" value={form.fracaoNum||""} onChange={e=>sf("fracaoNum")(e.target.value)}>
+            <option value="">Seleccione...</option>{fracoes.map(f=><option key={f.id} value={f.numero}>{f.numero} — {f.prop_nome||f.proprietario}</option>)}
+          </select></FG>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <FG label="Mês"><select className="input" value={form.mes||new Date().getMonth()+1} onChange={e=>sf("mes")(e.target.value)}>{MESES.map((m,i)=><option key={i} value={i+1}>{m}</option>)}</select></FG>
+            <FG label="Ano"><select className="input" value={form.ano||new Date().getFullYear()} onChange={e=>sf("ano")(e.target.value)}>{anos.map(y=><option key={y} value={y}>{y}</option>)}</select></FG>
+          </div>
+          <FG label="Motivo (opcional)"><input className="input" placeholder="Ex: Crédito de meses anteriores" value={form.motivo||""} onChange={e=>sf("motivo")(e.target.value)}/></FG>
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+            <button className="btn btn-outline" onClick={cm}>Cancelar</button>
+            <button className="btn btn-red" disabled={saving||!form.fracaoNum} onClick={()=>post("add_pagamento_quota",{fracao_numero:form.fracaoNum,data:form.data||today(),valor:0,mes:+form.mes||new Date().getMonth()+1,ano:+form.ano||new Date().getFullYear(),metodo:"Isento",referencia:form.motivo||""})}>
+              {saving?<span className="spinner"/>:"Aplicar Isenção"}
             </button>
           </div>
         </div>
