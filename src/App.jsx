@@ -4,7 +4,7 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, R
 /* ════════════════════════════════════════════════════════════════
    ⚙️  CONFIGURAÇÃO — altere estas duas linhas antes do deploy
 ════════════════════════════════════════════════════════════════ */
-const API_URL    = "https://script.google.com/macros/s/AKfycbwQOAy15QrNW9l_hMV9ICakPt0nvrmCEGnbWAB7ciCljZ8b_Ahks2wOP4svPdZ4_kJtDg/exec";
+const API_URL    = "https://script.google.com/macros/s/AKfycbzEzULjCGbEOiCZ7wBZGsDkyphY7cKtxQtNJFIRNF1HH15CzdSX6pC9yxufQdGmu6XFtw/exec";
 const API_SECRET = "12345678";
 
 /* ── FONTS ── */
@@ -75,15 +75,16 @@ function quotaInfo(fracaoId, pags, quotaMensal, anoBase, mesBase) {
 
 function contribInfo(c, fId, pagsCont) {
   const pags     = pagsCont.filter(p=>p.contribuicaoId===c.id && p.fracaoId===fId);
-  const total    = pags.reduce((s,p)=>s+p.valor,0);
+  // Isento: existe registo com metodo="Isento" para esta contribuição e fracção
+  const isento   = pags.some(p=>p.metodo==="Isento");
+  const total    = pags.filter(p=>p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
   const excluido = (c.excluidos||[]).includes(fId);
-  const vpf      = parseFloat(c.valorPorFracao) || 0;   // valor por fracção
-  const vt       = parseFloat(c.valorTotal)     || 0;   // valor total
-  const isLivre  = vpf === 0 && vt === 0;               // arrecadação livre
-  if (isLivre || excluido) return { totalPago:total, divida:0, pago:true, excluido, isLivre };
-  // Dívida por apartamento: usa sempre valorPorFracao (quando definido)
+  const vpf      = parseFloat(c.valorPorFracao) || 0;
+  const vt       = parseFloat(c.valorTotal)     || 0;
+  const isLivre  = vpf === 0 && vt === 0;
+  if (isLivre || excluido || isento) return { totalPago:total, divida:0, pago:true, excluido, isLivre, isento };
   const divida = vpf > 0 ? Math.max(0, vpf - total) : 0;
-  return { totalPago:total, divida, pago: vpf > 0 ? total >= vpf : total > 0, excluido:false, isLivre:false };
+  return { totalPago:total, divida, pago: vpf > 0 ? total >= vpf : total > 0, excluido:false, isLivre:false, isento:false };
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -91,37 +92,111 @@ function contribInfo(c, fId, pagsCont) {
 ═══════════════════════════════════════════════════════════════ */
 function printReport(appData, mes, ano, anual=false) {
   const { config, fracoes, pagamentosQuota, contribuicoes, pagamentosContribuicao, despesas } = appData;
-  const { predio, endereco, gestorNome, quotaMensal } = config;
+  const { predio, endereco, gestorNome, quotaMensal, anoBase, mesBase } = config;
   const fmtR = v => Math.round(v||0).toLocaleString("pt-PT")+" Kz";
 
-  let pqSel, despSel, pcSel, titulo;
-  if (anual) {
-    pqSel   = pagamentosQuota.filter(p=>p.ano===ano);
-    despSel = despesas.filter(d=>d.data?.startsWith(`${ano}-`));
-    pcSel   = pagamentosContribuicao.filter(p=>p.data?.startsWith(`${ano}-`));
-    titulo  = `Relatório Anual ${ano}`;
-  } else {
-    pqSel   = pagamentosQuota.filter(p=>p.mes===mes&&p.ano===ano);
-    despSel = despesas.filter(d=>d.data?.startsWith(`${ano}-${pad2(mes)}`));
-    pcSel   = pagamentosContribuicao.filter(p=>p.data?.startsWith(`${ano}-${pad2(mes)}`));
-    titulo  = `Relatório ${MESES[mes-1]} ${ano}`;
+  // ── MENSAL ──────────────────────────────────────────
+  if (!anual) {
+    const pqSel   = pagamentosQuota.filter(p=>p.mes===mes&&p.ano===ano&&p.metodo!=="Isento");
+    const despSel = despesas.filter(d=>d.data?.startsWith(`${ano}-${pad2(mes)}`));
+    const pcSel   = pagamentosContribuicao.filter(p=>p.data?.startsWith(`${ano}-${pad2(mes)}`)&&p.metodo!=="Isento");
+    const totalRec  = pqSel.reduce((s,p)=>s+p.valor,0)+pcSel.reduce((s,p)=>s+p.valor,0);
+    const totalDesp = despSel.reduce((s,d)=>s+d.valor,0);
+    const saldo     = totalRec-totalDesp;
+    const pagaram   = fracoes.filter(f=>pqSel.some(p=>p.fracaoId===f.id));
+    const naoPageram= fracoes.filter(f=>!f.excluiQuota&&!pqSel.some(p=>p.fracaoId===f.id)&&!pagamentosQuota.some(p=>p.fracaoId===f.id&&p.mes===mes&&p.ano===ano&&p.metodo==="Isento"));
+    const titulo    = `Relatório ${MESES[mes-1]} ${ano}`;
+    const html = `<!DOCTYPE html><html lang="pt"><head>
+<meta charset="UTF-8"><title>${titulo}</title>
+<link href="https://fonts.googleapis.com/css2?family=Lora:wght@400;700&family=Nunito:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0} body{font-family:'Nunito',sans-serif;color:#1C1A16;background:#fff;padding:28px;max-width:820px;margin:0 auto;font-size:13px}
+  h2{font-family:'Lora',serif;font-size:15px;font-weight:700;color:#B5341A;border-bottom:2px solid #B5341A;padding-bottom:5px;margin:22px 0 10px}
+  .hdr{border-bottom:3px solid #B5341A;padding-bottom:14px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-start}
+  .meta{font-size:12px;color:#8A8278;margin-top:6px}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+  .stat{background:#F5F3EF;border-radius:8px;padding:12px 14px}
+  .sl{font-size:10px;color:#8A8278;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
+  .sv{font-size:16px;font-weight:700} .g{color:#1E7A4A} .r{color:#B5341A}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px}
+  th{font-size:10px;color:#8A8278;text-transform:uppercase;letter-spacing:.4px;padding:7px 9px;border-bottom:1.5px solid #E2DDD6;text-align:left}
+  td{padding:8px 9px;font-size:12px;border-bottom:1px solid #F0EDE8}
+  .foot{margin-top:28px;padding-top:12px;border-top:1px solid #E2DDD6;font-size:11px;color:#8A8278;display:flex;justify-content:space-between}
+  @media print{body{padding:16px}}
+</style></head><body>
+<div class="hdr">
+  <div><div style="font-family:'Lora',serif;font-size:24px;font-weight:700">${predio}</div>
+  <div class="meta">${endereco}</div>
+  <div class="meta">📅 ${titulo} &nbsp;·&nbsp; 👤 ${gestorNome} &nbsp;·&nbsp; 🖨️ ${new Date().toLocaleDateString("pt-PT")}</div></div>
+  <div style="font-family:'Lora',serif;font-size:20px;font-weight:700;color:#B5341A;text-align:right">Relatório<br>Mensal</div>
+</div>
+<h2>Resumo</h2>
+<div class="grid">
+  <div class="stat"><div class="sl">Cobrado</div><div class="sv g">${fmtR(totalRec)}</div></div>
+  <div class="stat"><div class="sl">Despesas</div><div class="sv r">${fmtR(totalDesp)}</div></div>
+  <div class="stat"><div class="sl">Saldo do Mês</div><div class="sv ${saldo>=0?'g':'r'}">${fmtR(saldo)}</div></div>
+</div>
+${naoPageram.length>0?`<h2>Em Atraso</h2><table><thead><tr><th>Apt.</th><th>Proprietário / Residente</th></tr></thead><tbody>
+${naoPageram.map(f=>`<tr><td><b>${f.numero}</b></td><td>${f.inq_nome||f.prop_nome||f.proprietario}</td></tr>`).join("")}
+</tbody></table>`:""}
+${pagaram.length>0?`<h2>Pagamentos de Quota</h2><table><thead><tr><th>Apt.</th><th>Residente</th><th>Data</th><th>Valor</th><th>Método</th></tr></thead><tbody>
+${pagaram.map(f=>{const p=pqSel.find(x=>x.fracaoId===f.id);return`<tr><td><b>${f.numero}</b></td><td>${f.inq_nome||f.prop_nome||f.proprietario}</td><td>${fmtDate(p?.data)}</td><td><b>${fmtR(p?.valor)}</b></td><td style="color:#8A8278">${p?.metodo||"—"}</td></tr>`;}).join("")}
+</tbody></table>`:""}
+${despSel.length>0?`<h2>Despesas</h2><table><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Valor</th><th>Obs.</th></tr></thead><tbody>
+${despSel.map(d=>`<tr><td>${fmtDate(d.data)}</td><td>${d.descricao}</td><td style="color:#C96B15">${d.categoria}</td><td><b>${fmtR(d.valor)}</b></td><td style="color:#8A8278">${d.observacoes||""}</td></tr>`).join("")}
+<tr style="background:#FEF4E8"><td colspan="3"><b>Total Despesas</b></td><td><b>${fmtR(totalDesp)}</b></td><td></td></tr>
+</tbody></table>`:""}
+<div class="foot"><div>${predio} · ${endereco}</div><div>Gerado automaticamente · ${new Date().toLocaleString("pt-PT")}</div></div>
+</body></html>`;
+    const w=window.open("","_blank"); w.document.write(html); w.document.close(); setTimeout(()=>w.print(),600);
+    return;
   }
 
-  const totalRec  = pqSel.reduce((s,p)=>s+p.valor,0) + pcSel.reduce((s,p)=>s+p.valor,0);
-  const totalDesp = despSel.reduce((s,d)=>s+d.valor,0);
-  const saldo     = totalRec - totalDesp;
-  const pagaram   = fracoes.filter(f=>pqSel.some(p=>p.fracaoId===f.id));
-  const naoPageram= fracoes.filter(f=>!pqSel.some(p=>p.fracaoId===f.id) && f.excluiQuota!==true);
-  const quotaEsp  = fracoes.filter(f=>!f.excluiQuota).length * quotaMensal * (anual?12:1);
-  const taxaCob   = quotaEsp>0 ? Math.round((pqSel.reduce((s,p)=>s+p.valor,0)/quotaEsp)*100) : 0;
+  // ── ANUAL ────────────────────────────────────────────
+  const titulo = `Relatório Anual ${ano}`;
 
-  // Mensal breakdown for annual
-  const mesesRows = anual ? MESES.map((nm,i)=>{
+  // Receitas e despesas do ano seleccionado
+  const pqAno  = pagamentosQuota.filter(p=>p.ano===ano&&p.metodo!=="Isento");
+  const despAno= despesas.filter(d=>d.data?.startsWith(`${ano}-`));
+  const pcAno  = pagamentosContribuicao.filter(p=>p.data?.startsWith(`${ano}-`)&&p.metodo!=="Isento");
+
+  // Saldo transitado: tudo antes de 1/Jan/ano (excluindo isentos)
+  const pqAnte = pagamentosQuota.filter(p=>p.ano<ano&&p.metodo!=="Isento");
+  const despAnte=despesas.filter(d=>parseInt(d.data?.slice(0,4)||"0")<ano);
+  const pcAnte = pagamentosContribuicao.filter(p=>parseInt(p.data?.slice(0,4)||"0")<ano&&p.metodo!=="Isento");
+  const recAnte= pqAnte.reduce((s,p)=>s+p.valor,0)+pcAnte.reduce((s,p)=>s+p.valor,0);
+  const despAnteT=despAnte.reduce((s,d)=>s+d.valor,0);
+  const saldoTransitado = recAnte - despAnteT;
+
+  // YTD
+  const recAno  = pqAno.reduce((s,p)=>s+p.valor,0)+pcAno.reduce((s,p)=>s+p.valor,0);
+  const despAnoT= despAno.reduce((s,d)=>s+d.valor,0);
+  const saldoAno= recAno - despAnoT;
+  const saldoFinal = saldoTransitado + saldoAno;
+
+  // Detalhe mensal
+  const mesesRows = MESES.map((nm,i)=>{
     const m=i+1;
-    const r=pagamentosQuota.filter(p=>p.mes===m&&p.ano===ano).reduce((s,p)=>s+p.valor,0);
+    const r=pagamentosQuota.filter(p=>p.mes===m&&p.ano===ano&&p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0)
+           +pagamentosContribuicao.filter(p=>p.data?.startsWith(`${ano}-${pad2(m)}`)&&p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
     const d=despesas.filter(x=>x.data?.startsWith(`${ano}-${pad2(m)}`)).reduce((s,x)=>s+x.valor,0);
-    return `<tr><td>${nm}</td><td class="g">${fmtR(r)}</td><td class="r">${fmtR(d)}</td><td class="${r-d>=0?'g':'r'}">${fmtR(r-d)}</td></tr>`;
-  }).join("") : "";
+    const s=r-d;
+    const hasData=r>0||d>0;
+    return `<tr style="${hasData?'':'color:#C5C0B8'}"><td>${nm}</td><td class="${r>0?'g':''}">${fmtR(r)}</td><td class="${d>0?'r':''}">${fmtR(d)}</td><td class="${s>=0?'g':'r'}">${fmtR(s)}</td></tr>`;
+  }).join("");
+
+  // Dívidas de quotas em atraso (todos os anos até hoje)
+  const devedoresQuota = fracoes
+    .filter(f=>!f.excluiQuota)
+    .map(f=>{
+      const qi = quotaInfo(f.id, pagamentosQuota, quotaMensal, anoBase, mesBase);
+      return {...f, ...qi};
+    })
+    .filter(f=>f.divida>0)
+    .sort((a,b)=>b.divida-a.divida);
+
+  const totalDivida = devedoresQuota.reduce((s,f)=>s+f.divida,0);
+  const nome = f => f.inq_nome || f.prop_nome || f.proprietario;
 
   const html = `<!DOCTYPE html><html lang="pt"><head>
 <meta charset="UTF-8"><title>${titulo}</title>
@@ -131,17 +206,18 @@ function printReport(appData, mes, ano, anual=false) {
   h2{font-family:'Lora',serif;font-size:15px;font-weight:700;color:#B5341A;border-bottom:2px solid #B5341A;padding-bottom:5px;margin:22px 0 10px}
   .hdr{border-bottom:3px solid #B5341A;padding-bottom:14px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-start}
   .meta{font-size:12px;color:#8A8278;margin-top:6px}
-  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
-  .stat{background:#F5F3EF;border-radius:8px;padding:12px 14px}
+  .ytd{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;background:#F5F3EF;border-radius:10px;padding:16px}
+  .ytd-col{display:flex;flex-direction:column;gap:8px}
+  .ytd-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #E2DDD6;font-size:13px}
+  .ytd-row:last-child{border-bottom:none;font-weight:700;font-size:14px;padding-top:10px;margin-top:4px}
+  .stat{background:#fff;border-radius:8px;padding:10px 14px;border:1px solid #E2DDD6}
   .sl{font-size:10px;color:#8A8278;text-transform:uppercase;letter-spacing:.4px;margin-bottom:3px}
-  .sv{font-size:16px;font-weight:700} .g{color:#1E7A4A} .r{color:#B5341A}
+  .sv{font-size:15px;font-weight:700} .g{color:#1E7A4A} .r{color:#B5341A}
   table{width:100%;border-collapse:collapse;margin-bottom:16px}
   th{font-size:10px;color:#8A8278;text-transform:uppercase;letter-spacing:.4px;padding:7px 9px;border-bottom:1.5px solid #E2DDD6;text-align:left}
-  td{padding:8px 9px;font-size:12px;border-bottom:1px solid #F0EDE8}
-  .tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700}
-  .tg{background:#EBF7F1;color:#1E7A4A} .tr{background:#FAF0EE;color:#B5341A}
-  .pb{background:#E2DDD6;border-radius:20px;height:8px;overflow:hidden;margin:6px 0}
-  .pf{height:100%;border-radius:20px}
+  td{padding:7px 9px;font-size:12px;border-bottom:1px solid #F0EDE8}
+  .saldo-box{background:${saldoFinal>=0?'#EBF7F1':'#FAF0EE'};border-radius:10px;padding:14px 18px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
+  .divida-total{background:#FAF0EE;border-radius:10px;padding:14px 18px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
   .foot{margin-top:28px;padding-top:12px;border-top:1px solid #E2DDD6;font-size:11px;color:#8A8278;display:flex;justify-content:space-between}
   @media print{body{padding:16px}}
 </style></head><body>
@@ -149,35 +225,59 @@ function printReport(appData, mes, ano, anual=false) {
   <div><div style="font-family:'Lora',serif;font-size:24px;font-weight:700">${predio}</div>
   <div class="meta">${endereco}</div>
   <div class="meta">📅 ${titulo} &nbsp;·&nbsp; 👤 ${gestorNome} &nbsp;·&nbsp; 🖨️ ${new Date().toLocaleDateString("pt-PT")}</div></div>
-  <div style="font-family:'Lora',serif;font-size:20px;font-weight:700;color:#B5341A;text-align:right">${anual?"Relatório<br>Anual":"Relatório<br>Mensal"}</div>
+  <div style="font-family:'Lora',serif;font-size:20px;font-weight:700;color:#B5341A;text-align:right">Relatório<br>Anual</div>
 </div>
-<h2>Resumo</h2>
-<div class="grid">
-  <div class="stat"><div class="sl">Cobrado</div><div class="sv g">${fmtR(totalRec)}</div></div>
-  <div class="stat"><div class="sl">Despesas</div><div class="sv r">${fmtR(totalDesp)}</div></div>
-  <div class="stat"><div class="sl">Saldo</div><div class="sv ${saldo>=0?'g':'r'}">${fmtR(saldo)}</div></div>
-  <div class="stat"><div class="sl">Taxa cobrança quotas</div><div class="sv">${taxaCob}%</div></div>
+
+<h2>Posição Financeira Year-to-Date</h2>
+<div class="ytd">
+  <div class="ytd-col">
+    <div style="font-size:11px;font-weight:700;color:#8A8278;text-transform:uppercase;margin-bottom:4px">Exercício Anterior</div>
+    <div class="ytd-row"><span>Receitas acumuladas</span><span class="g">${fmtR(recAnte)}</span></div>
+    <div class="ytd-row"><span>Despesas acumuladas</span><span class="r">${fmtR(despAnteT)}</span></div>
+    <div class="ytd-row"><span>Saldo transitado</span><span class="${saldoTransitado>=0?'g':'r'}">${fmtR(saldoTransitado)}</span></div>
+  </div>
+  <div class="ytd-col">
+    <div style="font-size:11px;font-weight:700;color:#8A8278;text-transform:uppercase;margin-bottom:4px">${ano} (ano corrente)</div>
+    <div class="ytd-row"><span>Receitas do ano</span><span class="g">${fmtR(recAno)}</span></div>
+    <div class="ytd-row"><span>Despesas do ano</span><span class="r">${fmtR(despAnoT)}</span></div>
+    <div class="ytd-row"><span>Saldo do ano</span><span class="${saldoAno>=0?'g':'r'}">${fmtR(saldoAno)}</span></div>
+  </div>
 </div>
-${anual?`<h2>Detalhe por Mês</h2><table><thead><tr><th>Mês</th><th>Receitas</th><th>Despesas</th><th>Saldo</th></tr></thead><tbody>${mesesRows}</tbody></table>`:""}
-${naoPageram.length>0?`<h2>Em Atraso</h2><table><thead><tr><th>Apt.</th><th>Proprietário</th><th>Residente</th></tr></thead><tbody>
-${naoPageram.map(f=>`<tr><td><b>${f.numero}</b></td><td>${f.prop_nome||f.proprietario}</td><td>${f.inq_nome||"—"}</td></tr>`).join("")}
+<div class="saldo-box">
+  <span style="font-size:14px;font-weight:700">Saldo Final (transitado + ${ano})</span>
+  <span style="font-size:22px;font-weight:700;color:${saldoFinal>=0?'#1E7A4A':'#B5341A'}">${fmtR(saldoFinal)}</span>
+</div>
+
+<h2>Detalhe por Mês — ${ano}</h2>
+<table><thead><tr><th>Mês</th><th>Receitas</th><th>Despesas</th><th>Saldo</th></tr></thead>
+<tbody>${mesesRows}</tbody>
+<tfoot><tr style="background:#F5F3EF;font-weight:700"><td>Total ${ano}</td><td class="g">${fmtR(recAno)}</td><td class="r">${fmtR(despAnoT)}</td><td class="${saldoAno>=0?'g':'r'}">${fmtR(saldoAno)}</td></tr></tfoot>
+</table>
+
+${despAno.length>0?`<h2>Detalhe de Despesas — ${ano}</h2>
+<table><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Valor</th><th>Obs.</th></tr></thead><tbody>
+${[...despAno].sort((a,b)=>(a.data||"").localeCompare(b.data||"")).map(d=>`<tr><td>${fmtDate(d.data)}</td><td>${d.descricao}</td><td style="color:#C96B15">${d.categoria}</td><td><b>${fmtR(d.valor)}</b></td><td style="color:#8A8278">${d.observacoes||""}</td></tr>`).join("")}
+<tr style="background:#FEF4E8"><td colspan="3"><b>Total Despesas ${ano}</b></td><td><b>${fmtR(despAnoT)}</b></td><td></td></tr>
 </tbody></table>`:""}
-${pagaram.length>0?`<h2>Pagamentos de Quota</h2><table><thead><tr><th>Apt.</th><th>Proprietário</th><th>Data</th><th>Valor</th></tr></thead><tbody>
-${pagaram.map(f=>{const p=pqSel.find(x=>x.fracaoId===f.id);return`<tr><td><b>${f.numero}</b></td><td>${f.prop_nome||f.proprietario}</td><td>${fmtDate(p?.data)}</td><td><b>${fmtR(p?.valor)}</b></td></tr>`;}).join("")}
-</tbody></table>`:""}
-${despSel.length>0?`<h2>Despesas</h2><table><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Valor</th><th>Obs.</th></tr></thead><tbody>
-${despSel.map(d=>`<tr><td>${fmtDate(d.data)}</td><td>${d.descricao}</td><td><span class="tag" style="background:#FEF4E8;color:#C96B15">${d.categoria}</span></td><td><b>${fmtR(d.valor)}</b></td><td style="color:#8A8278">${d.observacoes||""}</td></tr>`).join("")}
-<tr style="background:#FEF4E8"><td colspan="3"><b>Total</b></td><td><b>${fmtR(totalDesp)}</b></td><td></td></tr>
-</tbody></table>`:""}
-<h2>Balanço Final</h2>
-<table><tbody>
-<tr><td>Total cobrado</td><td class="g"><b>${fmtR(totalRec)}</b></td></tr>
-<tr><td>Total despesas</td><td class="r"><b>${fmtR(totalDesp)}</b></td></tr>
-<tr style="background:${saldo>=0?'#EBF7F1':'#FAF0EE'}"><td><b>Saldo Líquido</b></td><td><b style="font-size:15px;color:${saldo>=0?'#1E7A4A':'#B5341A'}">${fmtR(saldo)}</b></td></tr>
-</tbody></table>
+
+${devedoresQuota.length>0?`<h2>Quotas Mensais em Atraso (acumulado)</h2>
+<div class="divida-total">
+  <span style="font-size:14px;font-weight:700">Total em dívida de quotas</span>
+  <span style="font-size:20px;font-weight:700;color:#B5341A">${fmtR(totalDivida)}</span>
+</div>
+<table><thead><tr><th>Apt.</th><th>Residente</th><th>Meses em Falta</th><th>Dívida</th></tr></thead><tbody>
+${devedoresQuota.map(f=>`<tr>
+  <td><b>${f.numero}</b></td>
+  <td>${nome(f)}</td>
+  <td style="color:#8A8278;font-size:11px">${f.mesesEmFalta.slice(0,6).map(m=>`${MESES_S[m.mes-1]}'${String(m.ano).slice(2)}`).join(", ")}${f.mesesEmFalta.length>6?` +${f.mesesEmFalta.length-6} mais`:""}</td>
+  <td><b class="r">${fmtR(f.divida)}</b></td>
+</tr>`).join("")}
+<tr style="background:#FAF0EE;font-weight:700"><td colspan="3">Total em Dívida</td><td class="r">${fmtR(totalDivida)}</td></tr>
+</tbody></table>`:"<p style='color:#1E7A4A;margin:8px 0'>✅ Sem dívidas de quotas em atraso.</p>"}
+
 <div class="foot"><div>${predio} · ${endereco}</div><div>Gerado automaticamente · ${new Date().toLocaleString("pt-PT")}</div></div>
 </body></html>`;
-  const w = window.open("","_blank"); w.document.write(html); w.document.close(); setTimeout(()=>w.print(),600);
+  const w=window.open("","_blank"); w.document.write(html); w.document.close(); setTimeout(()=>w.print(),600);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -873,8 +973,9 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
         {tab==="contribuicoes"&&<>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,flexWrap:"wrap",gap:10}}>
             <span className="section-hd">Outras Contribuições</span>
-            <div style={{display:"flex",gap:8}}>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               <button className="btn btn-outline" onClick={()=>om("pagContrib")}>+ Registar Pgto.</button>
+              <button className="btn btn-outline" onClick={()=>om("isentarContrib")} style={{color:"#C96B15",borderColor:"#C96B15"}}>🚫 Isentar Apt.</button>
               <button className="btn btn-blue" onClick={()=>om("pagContribBulk")}>⚡ Lançar para todos</button>
               <button className="btn btn-red" onClick={()=>om("contrib")}>+ Nova Contribuição</button>
             </div>
@@ -1029,24 +1130,68 @@ function GestorDashboard({appData, apiUrl, apiSecret, onBack, onReload, loading}
         </div>
       </Modal>}
 
-      {/* ── ISENTAR MÊS DE QUOTA ── */}
-      {modal==="isentarMes"&&<Modal title="🚫 Isentar Mês de Quota" onClose={cm}>
+      {/* ── ISENTAR INTERVALO DE QUOTAS ── */}
+      {modal==="isentarMes"&&<Modal title="🚫 Isentar Meses de Quota" onClose={cm}>
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <div style={{background:"#EBF1FA",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#1A4F8B"}}>
-            O apartamento ficará isento da quota neste mês — não aparecerá como devedor.<br/>
-            Pode usar isto para acordos em que um valor anterior abona uma quota futura.
+            Os meses seleccionados ficam isentos — o apartamento não aparecerá como devedor nesses períodos.<br/>
+            Pode definir um único mês ou um intervalo (ex: apartamento abandonado durante anos).
           </div>
           <FG label="Apartamento"><select className="input" value={form.fracaoNum||""} onChange={e=>sf("fracaoNum")(e.target.value)}>
             <option value="">Seleccione...</option>{fracoes.map(f=><option key={f.id} value={f.numero}>{f.numero} — {f.prop_nome||f.proprietario}</option>)}
           </select></FG>
+          <div style={{fontWeight:600,fontSize:12,color:"#8A8278",textTransform:"uppercase",letterSpacing:.5}}>Início do período</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <FG label="Mês"><select className="input" value={form.mes||new Date().getMonth()+1} onChange={e=>sf("mes")(e.target.value)}>{MESES.map((m,i)=><option key={i} value={i+1}>{m}</option>)}</select></FG>
-            <FG label="Ano"><select className="input" value={form.ano||new Date().getFullYear()} onChange={e=>sf("ano")(e.target.value)}>{anos.map(y=><option key={y} value={y}>{y}</option>)}</select></FG>
+            <FG label="Mês início"><select className="input" value={form.mesIni||1} onChange={e=>sf("mesIni")(+e.target.value)}>{MESES.map((m,i)=><option key={i} value={i+1}>{m}</option>)}</select></FG>
+            <FG label="Ano início"><select className="input" value={form.anoIni||new Date().getFullYear()} onChange={e=>sf("anoIni")(+e.target.value)}>{anos.map(y=><option key={y} value={y}>{y}</option>)}</select></FG>
           </div>
-          <FG label="Motivo (opcional)"><input className="input" placeholder="Ex: Crédito de meses anteriores" value={form.motivo||""} onChange={e=>sf("motivo")(e.target.value)}/></FG>
+          <div style={{fontWeight:600,fontSize:12,color:"#8A8278",textTransform:"uppercase",letterSpacing:.5}}>Fim do período <span style={{fontWeight:400,textTransform:"none"}}>(igual ao início = apenas 1 mês)</span></div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <FG label="Mês fim"><select className="input" value={form.mesFim||form.mesIni||1} onChange={e=>sf("mesFim")(+e.target.value)}>{MESES.map((m,i)=><option key={i} value={i+1}>{m}</option>)}</select></FG>
+            <FG label="Ano fim"><select className="input" value={form.anoFim||form.anoIni||new Date().getFullYear()} onChange={e=>sf("anoFim")(+e.target.value)}>{anos.map(y=><option key={y} value={y}>{y}</option>)}</select></FG>
+          </div>
+          {(()=>{
+            const mi=+form.mesIni||1, ai=+form.anoIni||new Date().getFullYear();
+            const mf=+form.mesFim||mi, af=+form.anoFim||ai;
+            let count=0, y=ai, m=mi;
+            while(y<af||(y===af&&m<=mf)){count++;m++;if(m>12){m=1;y++;}}
+            return <div style={{background:"#F5F3EF",borderRadius:8,padding:"8px 12px",fontSize:13,color:"#8A8278"}}>
+              Total: <b style={{color:"#1C1A16"}}>{count} {count===1?"mês":"meses"} isentos</b>
+            </div>;
+          })()}
+          <FG label="Motivo (opcional)"><input className="input" placeholder="Ex: Apartamento abandonado" value={form.motivo||""} onChange={e=>sf("motivo")(e.target.value)}/></FG>
           <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
             <button className="btn btn-outline" onClick={cm}>Cancelar</button>
-            <button className="btn btn-red" disabled={saving||!form.fracaoNum} onClick={()=>post("add_pagamento_quota",{fracao_numero:form.fracaoNum,data:form.data||today(),valor:0,mes:+form.mes||new Date().getMonth()+1,ano:+form.ano||new Date().getFullYear(),metodo:"Isento",referencia:form.motivo||""})}>
+            <button className="btn btn-red" disabled={saving||!form.fracaoNum} onClick={()=>{
+              const mi=+form.mesIni||1, ai=+form.anoIni||new Date().getFullYear();
+              const mf=+form.mesFim||mi, af=+form.anoFim||ai;
+              const meses=[]; let y=ai, m=mi;
+              while(y<af||(y===af&&m<=mf)){meses.push({mes:m,ano:y});m++;if(m>12){m=1;y++;}}
+              post("add_isencoes_quota",{fracao_numero:form.fracaoNum,meses,motivo:form.motivo||""});
+            }}>
+              {saving?<span className="spinner"/>:"Aplicar Isenções"}
+            </button>
+          </div>
+        </div>
+      </Modal>}
+
+      {/* ── ISENTAR APARTAMENTO DE CONTRIBUIÇÃO ── */}
+      {modal==="isentarContrib"&&<Modal title="🚫 Isentar Apartamento de Contribuição" onClose={cm}>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{background:"#FEF4E8",borderRadius:8,padding:"10px 14px",fontSize:13,color:"#C96B15"}}>
+            O apartamento ficará isento desta contribuição — não aparecerá como devedor na página pública.
+          </div>
+          <FG label="Contribuição"><select className="input" value={form.contribTitulo||""} onChange={e=>sf("contribTitulo")(e.target.value)}>
+            <option value="">Seleccione...</option>{contribuicoes.map(c=><option key={c.id} value={c.titulo}>{c.titulo}</option>)}
+          </select></FG>
+          <FG label="Apartamento"><select className="input" value={form.fracaoNum||""} onChange={e=>sf("fracaoNum")(e.target.value)}>
+            <option value="">Seleccione...</option>{fracoes.map(f=><option key={f.id} value={f.numero}>{f.numero} — {f.prop_nome||f.proprietario}</option>)}
+          </select></FG>
+          <FG label="Motivo (opcional)"><input className="input" placeholder="Ex: Acordo prévio com gestão" value={form.motivo||""} onChange={e=>sf("motivo")(e.target.value)}/></FG>
+          <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+            <button className="btn btn-outline" onClick={cm}>Cancelar</button>
+            <button className="btn btn-red" disabled={saving||!form.contribTitulo||!form.fracaoNum}
+              onClick={()=>post("add_pagamento_contribuicao",{contribuicao_titulo:form.contribTitulo,fracao_numero:form.fracaoNum,data:form.data||today(),valor:0,metodo:"Isento",referencia:form.motivo||""})}>
               {saving?<span className="spinner"/>:"Aplicar Isenção"}
             </button>
           </div>
