@@ -1,8 +1,16 @@
 // ═══════════════════════════════════════════════════════════════
-//  CONDOMÍNIO — Google Apps Script API  v5
+//  CONDOMÍNIO — Google Apps Script API  v6
 //  Cole este código em: script.google.com → projecto ligado ao Sheets
-//  Depois: Implementar → Nova implementação → Aplicação Web
+//  Depois: Implementar → Gerir implementações → editar → Nova versão
 //          (Executar como: Eu · Acesso: Qualquer pessoa)
+//
+//  NOVO NA v6 — PÁGINA PÚBLICA
+//  • A leitura pública deixa de incluir nomes de proprietários e
+//    inquilinos: a página do prédio mostra apenas o nº do apartamento.
+//  • Inclui as despesas (data, descrição, categoria, valor) e os totais
+//    mensais de entradas (quotas e contribuições, pela data de pagamento)
+//    para o separador "Contas". As datas de cada pagamento continuam
+//    privadas — só os totais do mês são públicos.
 //
 //  NOVO NA v5 — SEGURANÇA
 //  • Já não existe API_SECRET. As gravações exigem uma sessão de gestor,
@@ -23,7 +31,7 @@
 //  • Editar e apagar lançamentos (quotas, contribuições, despesas, avisos).
 // ═══════════════════════════════════════════════════════════════
 
-const VERSAO         = "v5";
+const VERSAO         = "v6";
 const SS             = SpreadsheetApp.getActiveSpreadsheet();
 const PROPS          = PropertiesService.getScriptProperties();
 const SESSAO_HORAS   = 8;   // duração de uma sessão de gestor
@@ -526,9 +534,9 @@ function dadosPublicos(d) {
       anoBase:     d.config.anoBase,
       mesBase:     d.config.mesBase,
     },
+    // Sem nomes: a página pública mostra só o nº do apartamento (v6)
     fracoes: d.fracoes.map(f => ({
       id: f.id, numero: f.numero, andar: f.andar,
-      prop_nome: f.prop_nome, proprietario: f.proprietario, inq_nome: f.inq_nome,
       excluiQuota: f.excluiQuota, ativa: f.ativa,
     })),
     pagamentosQuota: d.pagamentosQuota.map(p => ({
@@ -547,7 +555,30 @@ function dadosPublicos(d) {
     avisos: d.avisos.map(a => ({
       id: a.id, tipo: a.tipo, titulo: a.titulo, conteudo: a.conteudo, data: a.data, autor: a.autor,
     })),
+    despesas: d.despesas.map(x => ({
+      id: x.id, data: x.data, valor: x.valor, descricao: x.descricao, categoria: x.categoria,
+    })),
+    entradasMensais: entradasMensais(d),
   };
+}
+
+// Totais de entradas por mês ("aaaa-mm"), pela data do pagamento.
+// Quotas sem data usam o mês de referência. Isenções não contam.
+function entradasMensais(d) {
+  const m = {};
+  const slot = k => (m[k] = m[k] || { mes: k, quotas: 0, contribuicoes: 0 });
+  const chave = s => /^\d{4}-\d{2}/.test(String(s || "")) ? String(s).slice(0, 7) : "";
+  d.pagamentosQuota.forEach(p => {
+    if (p.metodo === "Isento") return;
+    const k = chave(p.data) || (p.ano && p.mes ? p.ano + "-" + ("0" + p.mes).slice(-2) : "");
+    if (k) slot(k).quotas += p.valor;
+  });
+  d.pagamentosContribuicao.forEach(p => {
+    if (p.metodo === "Isento") return;
+    const k = chave(p.data);
+    if (k) slot(k).contribuicoes += p.valor;
+  });
+  return Object.keys(m).sort().map(k => m[k]);
 }
 
 

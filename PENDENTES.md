@@ -3,6 +3,56 @@
 Lista de trabalho da app (Vercel: bosch-app-4xip.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
+## ✅ Feito na v6 (app + Code.gs) — revisão UI/UX
+
+**Antes de publicar:** actualizar o Apps Script com o novo `Code.gs` e fazer
+*Implementar → Gerir implementações → editar (lápis) → Versão: Nova versão*.
+Assim o URL não muda. Sem este passo a app funciona, mas o separador "Contas"
+fica vazio e a página pública continua a receber os nomes.
+
+**Erros corrigidos**
+- Relatório mensal mostrava só o primeiro pagamento de cada apartamento (pagamentos em duas partes apareciam a menos na tabela).
+- Etiquetas de atraso incoerentes: agora 1 mês = Pendente, 2–3 = Em atraso, 4+ = Grande atraso, em toda a app.
+- O contador do separador Avisos não batia com a lista; conta agora os avisos dos últimos 30 dias (todos os tipos), os mesmos marcados "Novo".
+
+**Morador (página pública)**
+- Quotas: grelha do prédio por andar, só com o nº do apartamento; tocar num apartamento mostra os meses em falta e o valor.
+- Privacidade: a leitura pública do Apps Script deixa de enviar nomes de proprietários e inquilinos (também nas Contribuições e em "Ver o meu apartamento").
+- Novo separador Contas: saldo em caixa, conta do mês (saldo inicial + entradas − despesas), despesas por categoria e relatório do mês (sem nomes) para imprimir/PDF.
+- Quotas e Contribuições continuam em separadores distintos.
+- Cabeçalho sem gradiente, hora de actualização legível, "Área do gestor" no rodapé.
+
+**Gestor**
+- Painel do mês: cobrança (apts que pagaram, cobrado vs esperado), saldo em caixa, despesas do mês, dívida total, lista "A cobrar" com lembrete/detalhe/registar, saldo dos últimos 12 meses e últimos lançamentos.
+- Quotas: mapa apartamentos × meses (pago, parcial, em falta, isento, por vencer); tocar num mês para registar, isentar, editar ou apagar. O histórico em lista continua em "Mais".
+- Registar pagamento com os meses em botões (os em falta vêm seleccionados), valor calculado e repartido pelo que falta em cada mês, "Registar e novo".
+- Telemóvel: barra de navegação em baixo, botão "Registar" sempre visível, apartamentos e despesas em cartões.
+- Confirmações dentro da app (acabaram os `window.confirm`); apagar oferece "Anular" (volta a criar o registo).
+- Contribuições: registar, lançar para vários e isentar dentro de cada cartão, com a grelha de quem já pagou.
+- Cabeçalho: "Ver página pública" e menu da conta (actualizar, partilhar link, configurar ligação, terminar sessão).
+- Escolher apartamento com pesquisa por nº ou nome, com a situação ao lado.
+- Erros de validação junto ao campo, com o cursor posto lá.
+- Partilhar aviso por WhatsApp (depois de publicar e em cada aviso).
+- Despesas: resumo por categoria que segue os filtros.
+- Aviso 10 minutos antes de a sessão terminar; o formulário aberto fica guardado e pode ser retomado depois de entrar.
+- Acções raras (isentar, histórico) passam para menus "Mais".
+
+**Relatórios**
+- Separador Relatórios com pré-visualização; imprimir / guardar PDF a partir dela (já não abre janela nem imprime sozinho).
+- Mensal: conta do mês (saldo inicial, entradas, saídas, saldo final), cobrança do mês, entradas pela data do pagamento (uma linha por pagamento, ou agrupadas), saídas com resumo por categoria, atrasos acumulados com meses, valores e proprietário/inquilino.
+- Anual: acumulado do ano (anos anteriores + ano), mês a mês com saldo em caixa e quotas pagas, despesas por categoria, estado das contribuições.
+- Novos: extracto por apartamento e lista de atrasos.
+- Sem emojis, sinais + / −, nº de página, cabeçalho de tabela repetido, bloco de aprovação em assembleia (opcional).
+- Caixa vs cobrança separados: entradas e saldo contam pela data em que o dinheiro entrou; a cobrança conta pelo mês de referência. O gráfico de entradas/despesas do painel usa também a data.
+
+**Transversal**
+- Cores em variáveis CSS; cinzentos e âmbar mais escuros (contraste ≥ 4,5:1); vermelho reservado para dívida (nºs de apartamento a escuro).
+- Ícones de traço em vez de emojis; botões só com ícone têm nome para leitores de ecrã.
+- Botões com pelo menos 44 px de altura no telemóvel.
+- Modais fecham com Esc, prendem o foco e devolvem-no ao fechar; rótulos ligados aos campos.
+- Carregamento com a estrutura da página em vez de só um spinner.
+- Código dividido em ficheiros: `lib.js` (cálculos), `ui.jsx` (componentes e estilos), `Publico.jsx`, `Gestor.jsx`, `Relatorios.jsx` e `relatoriosHtml.js`.
+
 ## ✅ Feito na v5 (app + Code.gs)
 
 **Erros corrigidos**
@@ -33,7 +83,12 @@ Lista de trabalho da app (Vercel: bosch-app-4xip.vercel.app) e do Apps Script
 
 ## 🕒 Pendentes para próximas versões
 
+- **Visão pessoal do morador** (mockups M0/M1 da revisão UI/UX): escolher o apartamento uma vez, ficar guardado no telemóvel (ou link `?apt=3B`) e abrir logo na situação pessoal — "login único e visão única".
+- **Como pagar** na página pública: IBAN, titular, descritivo a usar e botão para enviar o comprovativo ao gestor (precisa de novos campos na aba ⚙️ Configurações).
+- **Aviso em destaque** no topo da página pública (último aviso dos últimos 30 dias).
+- **Instalar no telemóvel (PWA)**: `manifest.json` e ícone para "Adicionar ao ecrã principal".
 - **Recibo de pagamento** para imprimir ou enviar por WhatsApp depois de registar uma quota.
+- **Partilhar relatório em PDF directamente** (hoje: imprimir → Guardar como PDF → partilhar).
 - **Usar campos da folha que a app ainda ignora:**
   - `multa_atraso_pct` → calcular multa por atraso;
   - `fracao_ativa` → esconder apartamentos inactivos.
