@@ -2,7 +2,7 @@
    Constantes, formatação, API e cálculos partilhados
 ════════════════════════════════════════════════════════════════ */
 export const APP_VERSAO = "v6";
-export const API_URL    = "https://script.google.com/macros/s/AKfycbyWrMJMvV3RpXIck9Z_hl6EPFRERnoBk6O3Ii-rQ3Ccp7PBnNM45TP8HUs-zYICRzeV-Q/exec";
+export const API_URL    = "https://script.google.com/macros/s/AKfycbyvN52wjCWtvSOMrRqszVtOZC1OfSnfciOSN1iANp-vH-Ap6wIgchYlUuIu9SUyQgUsVw/exec";
 
 export const MESES   = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 export const MESES_S = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
