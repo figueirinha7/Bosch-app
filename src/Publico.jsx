@@ -115,7 +115,6 @@ function PredioQuotas({appData}) {
     infos.forEach(x=>{ const a = andarDe(x.f); if(!g.has(a)) g.set(a,[]); g.get(a).push(x); });
     return [...g.entries()].sort((a,b)=> a[0]===null ? 1 : b[0]===null ? -1 : b[0]-a[0]).map(([a,xs])=>[a, xs.sort((p,q)=>numCmp(p.f,q.f))]);
   },[infos]);
-  const cols = Math.min(4, Math.max(...andares.map(([,xs])=>xs.length), 1));
   const x = sel && infos.find(i=>i.f.id===sel);
   const estilo = i => !i.qi ? CEL.exc : i.qi.mesesAtraso===0 ? CEL.ok : i.qi.mesesAtraso===1 ? CEL.um : CEL.mau;
   const txt = i => !i.qi ? "Sem quota" : i.qi.mesesAtraso===0 ? "Em dia" : i.qi.mesesAtraso===1 ? "1 mês" : `${i.qi.mesesAtraso} meses`;
@@ -143,17 +142,20 @@ function PredioQuotas({appData}) {
         <h2 className="h2">Por andar</h2>
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
           {andares.map(([a,xs])=>(
-            <div key={String(a)} style={{display:"grid",gridTemplateColumns:`44px repeat(${cols},minmax(0,1fr))`,gap:8,alignItems:"center"}}>
-              <span style={{fontSize:13,fontWeight:800,color:"var(--ink-2)"}}>{nomeAndar(a)}</span>
+            <div key={String(a)} style={{display:"grid",gridTemplateColumns:"48px minmax(0,1fr)",gap:8,alignItems:"start"}}>
+              <span style={{fontSize:13,fontWeight:800,color:"var(--ink-2)",lineHeight:"64px"}}>{nomeAndar(a)}</span>
+              {/* Colunas de largura fixa iguais em todos os andares: os quadrados têm sempre o mesmo tamanho */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(84px,1fr))",gap:8}}>
               {xs.map(i=>(
                 <button key={i.f.id} onClick={()=>setSel(s=>s===i.f.id?null:i.f.id)} aria-pressed={sel===i.f.id}
                   aria-label={`Apartamento ${i.f.numero}: ${txt(i)}`}
-                  style={{...estilo(i),minHeight:64,borderRadius:10,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,cursor:"pointer",fontFamily:"'Nunito',sans-serif",
+                  style={{...estilo(i),height:64,minWidth:0,padding:"0 6px",borderRadius:10,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,cursor:"pointer",fontFamily:"'Nunito',sans-serif",overflow:"hidden",
                     ...(sel===i.f.id?{boxShadow:"0 0 0 3px var(--bg), 0 0 0 5px var(--ink)"}:{})}}>
-                  <span className="serif" style={{fontSize:18,fontWeight:700,lineHeight:1}}>{i.f.numero}</span>
-                  <span style={{fontSize:12,fontWeight:800}}>{txt(i)}</span>
+                  <span className="serif" style={{fontSize:18,fontWeight:700,lineHeight:1.1,maxWidth:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{i.f.numero}</span>
+                  <span style={{fontSize:12,fontWeight:800,whiteSpace:"nowrap"}}>{txt(i)}</span>
                 </button>
               ))}
+              </div>
             </div>
           ))}
         </div>
