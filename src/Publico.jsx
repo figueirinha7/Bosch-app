@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { APP_VERSAO, MESES, fmtKz, fmtNum, fmtSinal, fmtDate, fmtDateCurta, fmtDateTime, today, chaveMes,
-  quotaInfo, contribInfo, metaContrib, situacaoApt, nivelAtraso, resumoMeses, andarDe, nomeAndar,
+  quotaInfo, contribInfo, contribFechada, metaContrib, situacaoApt, nivelAtraso, resumoMeses, andarDe, nomeAndar,
   fluxoMensal, contaMes, primeiroMes, temContas } from "./lib.js";
 import { relatorioMensal } from "./relatoriosHtml.js";
 import { Icon, Modal, MesNav } from "./ui.jsx";
@@ -198,10 +198,16 @@ function PredioQuotas({appData}) {
 ═══════════════════════════════════════════════════════════════ */
 function PublicContribuicoes({appData}) {
   const { fracoes, contribuicoes, pagamentosContribuicao } = appData;
+  const [verFechadas,setVerFechadas] = useState(false);
+  const abertas  = contribuicoes.filter(c=>!contribFechada(c));
+  const fechadas = contribuicoes.filter(contribFechada);
+  const lista = verFechadas ? [...abertas, ...fechadas] : abertas;
   if (!contribuicoes.length) return <div className="card anim" style={{textAlign:"center",padding:"36px 0",color:"var(--ink-2)"}}>Sem contribuições registadas.</div>;
   return (
     <div className="anim" style={{display:"flex",flexDirection:"column",gap:14}}>
-      {contribuicoes.map(c=>{
+      {!abertas.length&&!verFechadas&&<div className="card" style={{textAlign:"center",padding:"28px 0",color:"var(--ink-2)"}}>Sem contribuições em curso.</div>}
+      {lista.map(c=>{
+        const fechada = contribFechada(c);
         const apts = fracoes.map(f=>({ f, ...contribInfo(c,f.id,pagamentosContribuicao) })).sort((a,b)=>numCmp(a.f,b.f));
         const totalCob = pagamentosContribuicao.filter(p=>p.contribuicaoId===c.id&&p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
         const isLivre = !(parseFloat(c.valorPorFracao)||0) && !(parseFloat(c.valorTotal)||0);
@@ -212,11 +218,12 @@ function PublicContribuicoes({appData}) {
         const devedoresN = apts.filter(x=>x.divida>0).length;
         const vencido = c.dataVencimento && c.dataVencimento<today() && devedoresN>0;
         return (
-          <section key={c.id} className="card" style={{display:"flex",flexDirection:"column",gap:12}}>
+          <section key={c.id} className="card" style={{display:"flex",flexDirection:"column",gap:12,...(fechada?{background:"var(--grey-bg)"}:{})}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
               <div style={{display:"flex",flexDirection:"column",gap:3}}>
-                <h2 style={{fontWeight:800,fontSize:17}}>{c.titulo} {c.estado&&c.estado!=="Aberto"&&<span className="tag tag-grey" style={{marginLeft:4}}>{c.estado}</span>}</h2>
+                <h2 style={{fontWeight:800,fontSize:17}}>{c.titulo} {fechada?<span className="tag tag-grey" style={{marginLeft:4}}>Fechada</span>:c.estado&&c.estado!=="Aberto"&&<span className="tag tag-grey" style={{marginLeft:4}}>{c.estado}</span>}</h2>
                 {c.descricao&&<div style={{fontSize:14,color:"var(--ink-2)"}}>{c.descricao}</div>}
+                {fechada&&<div style={{fontSize:13,color:"var(--ink-2)"}}>Contribuição encerrada: já não é cobrada.</div>}
                 {c.dataVencimento&&<div style={{fontSize:13,color:vencido?"var(--divida)":"var(--ink-2)",fontWeight:vencido?700:400}}>{vencido?"Prazo terminado: ":"Prazo: "}{fmtDate(c.dataVencimento)}</div>}
                 {c.valorPorFracao>0&&<div style={{fontSize:13,color:"var(--ink-2)"}}>{fmtKz(c.valorPorFracao)} por apartamento</div>}
               </div>
@@ -249,6 +256,8 @@ function PublicContribuicoes({appData}) {
           </section>
         );
       })}
+      {fechadas.length>0&&<button className="btn btn-ghost" style={{alignSelf:"center"}} aria-expanded={verFechadas} onClick={()=>setVerFechadas(v=>!v)}>
+        <Icon n={verFechadas?"up":"down"} s={16}/>{verFechadas?"Esconder fechadas":`Mostrar fechadas (${fechadas.length})`}</button>}
     </div>
   );
 }

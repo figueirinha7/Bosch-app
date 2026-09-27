@@ -150,6 +150,11 @@ export function nivelAtraso(meses) {
   return { k:"grande", label:"Grande atraso", tag:"tag-red-strong" };
 }
 
+// Contribuição fechada: mantém o histórico, mas não aceita pagamentos nem conta como dívida
+export const contribFechada = (c) => String(c?.estado||"").trim().toLowerCase() === "fechado";
+// Abertas primeiro, fechadas no fim (a ordem dentro de cada grupo mantém-se)
+export const ordenarContribs = (cs) => [...cs.filter(c=>!contribFechada(c)), ...cs.filter(contribFechada)];
+
 export function contribInfo(c, fId, pagsCont) {
   const pags     = pagsCont.filter(p=>p.contribuicaoId===c.id && p.fracaoId===fId);
   // Isento: existe registo com metodo="Isento" para esta contribuição e fracção
@@ -159,9 +164,10 @@ export function contribInfo(c, fId, pagsCont) {
   const vpf      = parseFloat(c.valorPorFracao) || 0;
   const vt       = parseFloat(c.valorTotal)     || 0;
   const isLivre  = vpf === 0 && vt === 0;
-  if (isLivre || excluido || isento) return { totalPago:total, divida:0, pago:true, excluido, isLivre, isento };
-  const divida = vpf > 0 ? Math.max(0, vpf - total) : 0;
-  return { totalPago:total, divida, pago: vpf > 0 ? total >= vpf : total > 0, excluido:false, isLivre:false, isento:false };
+  const fechada  = contribFechada(c);
+  if (isLivre || excluido || isento) return { totalPago:total, divida:0, pago:true, excluido, isLivre, isento, fechada };
+  const divida = fechada ? 0 : vpf > 0 ? Math.max(0, vpf - total) : 0;
+  return { totalPago:total, divida, pago: vpf > 0 ? total >= vpf : total > 0, excluido:false, isLivre:false, isento:false, fechada };
 }
 
 // Meta de uma contribuição: valor total, ou valor por apt × apts participantes

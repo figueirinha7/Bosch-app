@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { MESES, MESES_S, CATS, AVISO_TIPOS, METODOS, ESTADOS_CONTRIB, today, chaveMes, lblMes,
   fmtKz, fmtNum, fmtSinal, fmtDate, fmtDateCurta, nomeApt, apiPost, waAbrir, msgLembrete, msgAviso,
-  quotaInfo, estadoMes, nivelAtraso, contribInfo, metaContrib, situacaoApt, intervaloMeses, alocar, resumoMeses,
+  quotaInfo, estadoMes, nivelAtraso, contribInfo, contribFechada, ordenarContribs, metaContrib, situacaoApt, intervaloMeses, alocar, resumoMeses,
   fluxoMensal, contaMes, serieMeses, cobrancaMes, rascunhoGet, rascunhoSet } from "./lib.js";
 import { Icon, WaSvg, Modal, FG, CheckRow, Warn, Info, ModalBtns, RowActions, MesSelect, AnoSelect, Segmented,
   MesNav, Menu, AptCombo, ConfirmModal, Toast } from "./ui.jsx";
@@ -283,6 +283,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
   const submitPagContrib = ()=>{
     const c=contribById(form.contribId), f=aptByNum(form.fracaoNum);
     if(!c) return fail("Escolha a contribuição","contrib");
+    if(!form._row&&contribFechada(c)) return fail("Esta contribuição está fechada e já não aceita pagamentos","contrib");
     if(!f) return fail("Escolha o apartamento","apt");
     if(!(+form.valor>0)) return fail("Indique um valor maior que zero","valor");
     if(!form.data) return fail("Indique a data","data");
@@ -296,12 +297,14 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
   const submitIsentarContrib = ()=>{
     const c=contribById(form.contribId), f=aptByNum(form.fracaoNum);
     if(!c) return fail("Escolha a contribuição","contrib");
+    if(contribFechada(c)) return fail("Esta contribuição está fechada","contrib");
     if(!f) return fail("Escolha o apartamento","apt");
     post("add_pagamento_contribuicao",{contribuicao_id:c.id,fracao_numero:f.numero,data:today(),valor:0,metodo:"Isento",referencia:form.motivo||""});
   };
   const submitBulk = ()=>{
     const c=contribById(form.contribId), apts=form.bulkApts||[];
     if(!c) return fail("Escolha a contribuição","contrib");
+    if(contribFechada(c)) return fail("Esta contribuição está fechada e já não aceita pagamentos","contrib");
     if(!(+form.valor>0)) return fail("Indique um valor maior que zero","valor");
     if(!form.data) return fail("Indique a data","data");
     if(!apts.length) return fail("Seleccione pelo menos um apartamento","bulk");
@@ -311,6 +314,12 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
       body:`${jaPagaram.join(", ")} já ${jaPagaram.length===1?"pagou ou está isento":"pagaram ou estão isentos"} desta contribuição.`, onOk:()=>post("add_pagamento_contribuicao_bulk",d) });
     post("add_pagamento_contribuicao_bulk",d);
   };
+  const fecharContrib = c=>setConfirmar({ title:"Fechar contribuição?", okLabel:"Fechar",
+    body:<>“{c.titulo}” deixa de aceitar pagamentos e o que falta pagar deixa de contar como dívida dos apartamentos.<br/><span className="muted" style={{fontSize:14}}>O histórico e os pagamentos feitos mantêm-se. Pode reabrir mais tarde.</span></>,
+    onOk:()=>post("edit_contribuicao",{id:c.id,estado:"Fechado",_row:c._row,_sig:c._sig},{close:false,msgOk:"Contribuição fechada"}) });
+  const reabrirContrib = c=>setConfirmar({ title:"Reabrir contribuição?", okLabel:"Reabrir",
+    body:`“${c.titulo}” volta a aceitar pagamentos e o que falta pagar volta a contar como dívida dos apartamentos.`,
+    onOk:()=>post("edit_contribuicao",{id:c.id,estado:"Aberto",_row:c._row,_sig:c._sig},{close:false,msgOk:"Contribuição reaberta"}) });
   const submitDespesa = ()=>{
     if(!form.data) return fail("Indique a data","data");
     if(!String(form.descricao||"").trim()) return fail("Indique a descrição","descricao");
@@ -751,7 +760,8 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:16}}>
         {contribuicoes.length===0&&<div className="card" style={{textAlign:"center",padding:36,color:"var(--ink-2)"}}>Sem contribuições registadas.</div>}
-        {contribuicoes.map(c=>{
+        {ordenarContribs(contribuicoes).map(c=>{
+          const fechada=contribFechada(c);
           const isLivre=!(+c.valorPorFracao)&&!(+c.valorTotal);
           const meta=metaContrib(c,fracoes);
           const pcs=pagamentosContribuicao.filter(p=>p.contribuicaoId===c.id);
@@ -760,10 +770,10 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
           const apts=fracoesOrd.map(f=>({f,...contribInfo(c,f.id,pagamentosContribuicao)}));
           const porPagar=apts.filter(x=>x.divida>0);
           const aberto=!!abertos[c.id];
-          return <section key={c.id} className="card" style={{display:"flex",flexDirection:"column",gap:14}}>
+          return <section key={c.id} className="card" style={{display:"flex",flexDirection:"column",gap:14,...(fechada?{opacity:.65,background:"var(--grey-bg)"}:{})}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
               <div style={{display:"flex",flexDirection:"column",gap:3,minWidth:0}}>
-                <h2 style={{fontWeight:800,fontSize:18}}>{c.titulo} {c.estado&&c.estado!=="Aberto"&&<span className="tag tag-grey" style={{marginLeft:4}}>{c.estado}</span>}</h2>
+                <h2 style={{fontWeight:800,fontSize:18}}>{c.titulo} {fechada?<span className="tag tag-grey" style={{marginLeft:4}}><Icon n="lock" s={12}/> Fechada</span>:c.estado&&c.estado!=="Aberto"&&<span className="tag tag-grey" style={{marginLeft:4}}>{c.estado}</span>}</h2>
                 {c.descricao&&<div className="muted" style={{fontSize:14}}>{c.descricao}</div>}
                 <div className="muted" style={{fontSize:13}}>{[c.valorPorFracao>0&&`${fmtKz(c.valorPorFracao)} por apt.`, c.dataVencimento&&`prazo ${fmtDate(c.dataVencimento)}`, (c.excluidos||[]).length&&`excluídos: ${c.excluidos.map(id=>aptById(id)?.numero||id).join(", ")}`].filter(Boolean).join(" · ")}</div>
               </div>
@@ -774,24 +784,26 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
             </div>
             {!isLivre&&meta>0&&<div className="progress-bg" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={`${c.titulo}: ${pct}%`}><div className="progress-fill" style={{width:`${pct}%`,background:"var(--info)"}}/></div>}
             <div>
-              <div style={{fontSize:13,fontWeight:800,marginBottom:6}}>{isLivre?"Contribuições por apartamento":`Por pagar: ${porPagar.length} de ${apts.filter(x=>!x.excluido&&!x.isento).length}`}</div>
+              <div style={{fontSize:13,fontWeight:800,marginBottom:6}}>{isLivre?"Contribuições por apartamento":fechada?`Fechada, já não é cobrada · pagaram ${apts.filter(x=>!x.excluido&&!x.isento&&x.pago).length} de ${apts.filter(x=>!x.excluido&&!x.isento).length}`:`Por pagar: ${porPagar.length} de ${apts.filter(x=>!x.excluido&&!x.isento).length}`}</div>
               <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                 {apts.map(x=>{
-                  const k = x.excluido?"exc":x.isento?"ise":isLivre?(x.totalPago>0?"ok":"nada"):x.pago?"ok":"falta";
+                  const k = x.excluido?"exc":x.isento?"ise":isLivre?(x.totalPago>0?"ok":"nada"):x.pago?"ok":fechada?"nada":"falta";
                   const st = {ok:{background:"var(--ok-bg)",color:"var(--ok)"},falta:{background:"var(--divida-bg)",color:"var(--divida)",border:"1.5px solid var(--brand)"},exc:{background:"var(--grey-bg)",color:"#4A443D"},ise:{background:"var(--grey-bg)",color:"#4A443D"},nada:{background:"#fff",color:"var(--ink-2)",border:"1.5px dashed var(--line-3)"}}[k];
-                  const txt = k==="ok"?(isLivre?fmtNum(x.totalPago):"pago"):k==="falta"?fmtNum(x.divida):k==="exc"?"excluído":k==="ise"?"isento":"—";
-                  return <button key={x.f.id} className="btn btn-sm" style={{...st,gap:6,minHeight:36}} disabled={k==="exc"||k==="ise"}
-                    aria-label={`${x.f.numero}: ${txt}${k==="falta"||k==="nada"?", registar pagamento":""}`}
+                  const txt = k==="ok"?(isLivre?fmtNum(x.totalPago):"pago"):k==="falta"?fmtNum(x.divida):k==="exc"?"excluído":k==="ise"?"isento":fechada&&x.totalPago>0?fmtNum(x.totalPago):"—";
+                  return <button key={x.f.id} className="btn btn-sm" style={{...st,gap:6,minHeight:36}} disabled={fechada||k==="exc"||k==="ise"}
+                    aria-label={`${x.f.numero}: ${txt}${!fechada&&(k==="falta"||k==="nada")?", registar pagamento":""}`}
                     onClick={()=>abrirPagContrib(null,{contribId:c.id,fracaoNum:x.f.numero})}>
                     <b className="apt-num" style={{color:"inherit"}}>{x.f.numero}</b><span style={{fontSize:12}}>{txt}</span></button>;
                 })}
               </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
-              <button className="btn btn-red" onClick={()=>abrirPagContrib(null,{contribId:c.id})}><Icon n="plus" s={16}/>Registar pagamento</button>
-              <button className="btn btn-outline" onClick={()=>abrirBulk(c.id)}><Icon n="zap" s={16}/>Lançar para vários</button>
+              {!fechada&&<button className="btn btn-red" onClick={()=>abrirPagContrib(null,{contribId:c.id})}><Icon n="plus" s={16}/>Registar pagamento</button>}
+              {!fechada&&<button className="btn btn-outline" onClick={()=>abrirBulk(c.id)}><Icon n="zap" s={16}/>Lançar para vários</button>}
               <Menu label="Mais" icon={null} items={[
-                {label:"Isentar apartamento", icon:"ban", onClick:()=>om("isentarContrib",{contribId:c.id})},
+                ...(fechada?[]:[{label:"Isentar apartamento", icon:"ban", onClick:()=>om("isentarContrib",{contribId:c.id})}]),
+                fechada?{label:"Reabrir contribuição", icon:"refresh", onClick:()=>reabrirContrib(c)}
+                       :{label:"Fechar contribuição", icon:"lock", onClick:()=>fecharContrib(c)},
                 {label:"Editar contribuição", icon:"edit", onClick:()=>abrirContrib(c)},
                 {label:"Apagar contribuição", icon:"trash", danger:true, onClick:()=>pcs.length?fail("Esta contribuição tem pagamentos registados. Apague primeiro os pagamentos."):apagar("delete_contribuicao",c,`a contribuição “${c.titulo}”`,undoContrib(c),{id:c.id})},
               ]}/>
@@ -1039,7 +1051,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
 
     const contribSelect = (onChange)=> <FG label="Contribuição" {...ef("contrib")}>
       <select className="input" value={form.contribId||""} onChange={e=>onChange(e.target.value)}>
-        <option value="">Escolha…</option>{contribuicoes.map(c=><option key={c.id} value={c.id}>{c.titulo}</option>)}
+        <option value="">Escolha…</option>{ordenarContribs(contribuicoes).filter(c=>!contribFechada(c)||(form._row&&c.id===form.contribId)).map(c=><option key={c.id} value={c.id}>{c.titulo}{contribFechada(c)?" (fechada)":""}</option>)}
       </select></FG>;
     const contribAptInfo = c => f => { if(!c) return aptInfo(f); const ci=contribInfo(c,f.id,pagamentosContribuicao);
       return ci.excluido?{txt:"excluído"}:ci.isento?{txt:"isento"}:ci.isLivre?(ci.totalPago?{txt:fmtNum(ci.totalPago),tone:"ok"}:null):ci.pago?{txt:"pago",tone:"ok"}:{txt:`falta ${fmtNum(ci.divida)}`,tone:"bad"}; };

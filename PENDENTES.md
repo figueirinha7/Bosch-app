@@ -3,6 +3,20 @@
 Lista de trabalho da app (Vercel: bosch-app-4xip.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
+## ✅ Contribuições fechadas (app + Code.gs)
+
+**Antes de publicar:** actualizar o Apps Script com o novo `Code.gs` e publicar
+uma *Nova versão* na mesma implementação (o URL não muda). Sem este passo a app
+já esconde e bloqueia as fechadas, mas o servidor ainda aceitaria pagamentos.
+
+- Novo "Fechar contribuição" / "Reabrir contribuição" no menu "Mais" de cada cartão (com confirmação). Usa o campo Estado que já existia ("Fechado").
+- Fechada: deixa de aceitar pagamentos (registar, lançar para vários e isentar), tanto na app como no Apps Script.
+- Fechada: o que falta pagar deixa de contar como dívida (painel, "A cobrar", apartamentos, página pública, extracto, lista de atrasos).
+- Mantém o histórico, datas, prazo, valor total e os pagamentos feitos (continuam no saldo em caixa). Os pagamentos antigos podem ser editados ou apagados.
+- Gestor: fechadas no fim da lista, esbatidas, com a etiqueta "Fechada".
+- Página pública: fechadas escondidas atrás de "Mostrar fechadas".
+- Relatório anual: coluna "Falta" com "—" e estado "Fechado".
+
 ## ✅ Feito na v6 (app + Code.gs) — revisão UI/UX
 
 **Antes de publicar:** actualizar o Apps Script com o novo `Code.gs` e fazer
