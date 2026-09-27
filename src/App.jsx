@@ -10,6 +10,25 @@ import { GestorDashboard } from "./Gestor.jsx";
    Não há chave secreta no site: as gravações usam a sessão do gestor.
 ════════════════════════════════════════════════════════════════ */
 
+
+// "Failed to fetch" (Chrome), "Load failed" (Safari), "NetworkError" (Firefox):
+// o browser não conseguiu ler a resposta do Apps Script — normalmente a
+// implementação pede login (acesso não é "Qualquer pessoa") ou o URL é o de teste (/dev).
+const erroDeRede = (msg) => /failed to fetch|load failed|networkerror/i.test(String(msg||""));
+function AjudaLigacao({url}) {
+  return (
+    <div style={{fontSize:14,lineHeight:1.6,color:"#3D3832",textAlign:"left",maxWidth:460}}>
+      <p style={{marginBottom:8}}>O browser não conseguiu ler a resposta do Apps Script. Causas mais comuns:</p>
+      <ol style={{paddingLeft:20,marginBottom:10}}>
+        <li>A implementação não tem acesso <b>Qualquer pessoa</b> (em Implementar → Gerir implementações).</li>
+        <li>O URL é o de teste (termina em <b>/dev</b>) em vez do da aplicação web (termina em <b>/exec</b>).</li>
+        <li>O código foi colado mas não foi criada uma <b>Nova versão</b> da implementação.</li>
+      </ol>
+      {url&&<p>Para confirmar, abra <a href={url} target="_blank" rel="noreferrer" style={{color:"var(--info)",fontWeight:700,wordBreak:"break-all"}}>o endereço do Apps Script</a> numa janela privada: deve aparecer texto a começar por <code>{'{"ok":true'}</code>. Se aparecer uma página de login ou de erro do Google, o problema está na implementação.</p>}
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════════════════════
    SETUP SCREEN
 ═══════════════════════════════════════════════════════════════ */
@@ -31,6 +50,7 @@ function SetupScreen({onSave}) {
           <FG label="URL do Google Apps Script"><input className="input" type="url" value={url} placeholder="https://script.google.com/macros/s/.../exec" onChange={e=>setUrl(e.target.value.trim())}/></FG>
           {result&&<div role="status" className={`banner ${result.ok?"":"banner-warn"}`} style={result.ok?{background:"var(--ok-bg)",color:"var(--ok)"}:undefined}>
             <Icon n={result.ok?"checkCircle":"alert"} s={18}/>{result.msg}</div>}
+          {result&&!result.ok&&erroDeRede(result.msg)&&<AjudaLigacao url={url}/>}
           <div style={{display:"flex",gap:10,justifyContent:"flex-end",flexWrap:"wrap"}}>
             <button className="btn btn-outline" onClick={test} disabled={!url||testing}>{testing?<span className="spinner"/>:"Testar ligação"}</button>
             <button className="btn btn-red" onClick={()=>onSave({apiUrl:url})} disabled={!url}>Guardar e continuar<Icon n="right" s={16}/></button>
@@ -159,7 +179,7 @@ export default function App() {
     <main style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"var(--bg)",padding:24,gap:14,textAlign:"center"}}>
       <Icon n="alert" s={40} style={{color:"var(--divida)"}}/>
       <h1 className="serif" style={{fontSize:22}}>Erro de ligação</h1>
-      <p className="muted" style={{fontSize:15,maxWidth:400}}>{error}</p>
+      {erroDeRede(error) ? <AjudaLigacao url={cfg.apiUrl}/> : <p className="muted" style={{fontSize:15,maxWidth:400}}>{error}</p>}
       <button className="btn btn-red" onClick={reload}><Icon n="refresh" s={16}/>Tentar novamente</button>
       <button className="btn btn-ghost" onClick={()=>saveCfg(null)}><Icon n="settings" s={16}/>Configurar ligação</button>
     </main></>;
