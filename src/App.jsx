@@ -7,7 +7,7 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, R
    no site: as gravações usam a sessão do gestor (palavra-passe).
 ════════════════════════════════════════════════════════════════ */
 const APP_VERSAO = "v5";
-const API_URL    = "https://script.google.com/macros/s/AKfycbzEzULjCGbEOiCZ7wBZGsDkyphY7cKtxQtNJFIRNF1HH15CzdSX6pC9yxufQdGmu6XFtw/exec";
+const API_URL    = "https://script.google.com/macros/s/AKfycbyWrMJMvV3RpXIck9Z_hl6EPFRERnoBk6O3Ii-rQ3Ccp7PBnNM45TP8HUs-zYICRzeV-Q/exec";
 
 /* ── FONTS ── */
 const Fonts = () => <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Nunito:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />;
