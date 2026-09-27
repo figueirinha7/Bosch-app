@@ -4,6 +4,11 @@
 //  Depois: Implementar → Gerir implementações → editar → Nova versão
 //          (Executar como: Eu · Acesso: Qualquer pessoa)
 //
+//  NOVO — CONTRIBUIÇÕES FECHADAS
+//  • Uma contribuição com estado "Fechado" deixa de aceitar pagamentos
+//    (add_pagamento_contribuicao e _bulk recusam). O histórico mantém-se
+//    e os pagamentos antigos continuam a poder ser editados ou apagados.
+//
 //  NOVO NA v6 — PÁGINA PÚBLICA
 //  • A leitura pública deixa de incluir nomes de proprietários e
 //    inquilinos: a página do prédio mostra apenas o nº do apartamento.
@@ -641,6 +646,14 @@ function contribPorId(id) {
   return c;
 }
 
+// Contribuição fechada: mantém o histórico, mas já não aceita novos pagamentos
+function contribAberta(id) {
+  const c = contribPorId(id);
+  exigir(String(c.estado || "").trim().toLowerCase() !== "fechado",
+    "A contribuição “" + c.titulo + "” está fechada e já não aceita pagamentos.");
+  return c;
+}
+
 function numeroExiste(numero, excetoRow) {
   return readFracoes().some(f => String(f.numero).trim().toLowerCase() === String(numero).trim().toLowerCase()
                               && f._row !== parseInt(excetoRow));
@@ -814,7 +827,7 @@ function executar(action, data) {
     case "add_pagamento_contribuicao": {
       exigir(data.contribuicao_id, "Seleccione a contribuição");
       exigir(data.fracao_numero, "Seleccione o apartamento");
-      const c = contribPorId(data.contribuicao_id);
+      const c = contribAberta(data.contribuicao_id);
       const row = acrescentar("PGC", [{
         contribuicao_titulo: c.titulo, contribuicao_id: c.id,
         fracao_numero: data.fracao_numero, data: data.data || hoje(), valor: data.valor || 0,
@@ -825,7 +838,7 @@ function executar(action, data) {
 
     case "add_pagamento_contribuicao_bulk": {
       exigir(data.contribuicao_id, "Seleccione a contribuição");
-      const c = contribPorId(data.contribuicao_id);
+      const c = contribAberta(data.contribuicao_id);
       const numeros = data.fracao_numeros || [];
       exigir(numeros.length > 0, "Seleccione pelo menos um apartamento");
       const row = acrescentar("PGC", numeros.map(n => ({
