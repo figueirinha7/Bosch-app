@@ -97,18 +97,59 @@ fica vazio e a página pública continua a receber os nomes.
 
 ## 🕒 Pendentes para próximas versões
 
-- **Rever o "Em dívida (total)" do painel do gestor** (`src/Gestor.jsx`, `totQ`/`totC`): não se percebe de onde sai o valor (ex.: 1 930 000 Kz = Quotas 650 000 + Contribuições 1 280 000). Deve ser só dívida de quotas + dívida das contribuições **abertas**; confirmar que as fechadas não entram e mostrar o detalhe (tocar no cartão → lista por apartamento/contribuição).
-- **Visão pessoal do morador** (mockups M0/M1 da revisão UI/UX): escolher o apartamento uma vez, ficar guardado no telemóvel (ou link `?apt=3B`) e abrir logo na situação pessoal — "login único e visão única".
-- **Como pagar** na página pública: IBAN, titular, descritivo a usar e botão para enviar o comprovativo ao gestor (precisa de novos campos na aba ⚙️ Configurações).
-- **Aviso em destaque** no topo da página pública (último aviso dos últimos 30 dias).
-- **Instalar no telemóvel (PWA)**: `manifest.json` e ícone para "Adicionar ao ecrã principal".
-- **Recibo de pagamento** para imprimir ou enviar por WhatsApp depois de registar uma quota.
-- **Partilhar relatório em PDF directamente** (hoje: imprimir → Guardar como PDF → partilhar).
-- **Usar campos da folha que a app ainda ignora:**
-  - `multa_atraso_pct` → calcular multa por atraso;
-  - `fracao_ativa` → apartamentos inactivos devem aparecer como "Inactivo" (e não "Em dia") no separador Apartamentos do gestor e na grelha de Quotas da página pública; não devem gerar dívida nem contar em "A cobrar" / cobrança esperada. O Apps Script já envia `ativa`, falta a app usá-lo.
-- **Anexar factura** a uma despesa (foto/PDF no Google Drive).
-- Apagar apartamentos (hoje só se cria e edita).
+Cada item tem um código (ex.: **B2**) para pedir alterações directamente.
+Prioridade sugerida: 1) A1, A2, B1 · 2) C1, C2, D1 · 3) G1, G3, G4 · 4) E, F.
+
+### A. Números e estados (fiabilidade)
+
+- **A1. Rever o "Em dívida (total)" do painel do gestor** (`src/Gestor.jsx`, `totQ`/`totC`): não se percebe de onde sai o valor (ex.: 1 930 000 Kz = Quotas 650 000 + Contribuições 1 280 000). Deve ser só dívida de quotas + dívida das contribuições **abertas**; confirmar que as fechadas não entram e mostrar o detalhe (tocar no cartão → lista por apartamento/contribuição).
+- **A2. Apartamentos inactivos** (`fracao_ativa`): devem aparecer como "Inactivo" (e não "Em dia") no separador Apartamentos do gestor e na grelha de Quotas da página pública; não devem gerar dívida nem contar em "A cobrar" / cobrança esperada. O Apps Script já envia `ativa`, falta a app usá-lo.
+- **A3. Detalhe em todos os números do painel**: tocar em cobrança, saldo em caixa, despesas, etc. abre a lista que dá origem ao valor.
+- **A4. Estados coerentes em toda a app** (activo / inactivo / sem quota mensal) no painel, grelhas, relatórios, página pública e lembretes.
+- **A5. Multa por atraso** (`multa_atraso_pct`): calcular e mostrar separada da quota.
+
+### B. Regras de quotas
+
+- **B1. Histórico do valor da quota**: hoje há um único `quota_mensal_kz`; se a quota subir, os meses antigos passam a ser calculados pelo valor novo. Guardar valores com data de início.
+- **B2. Quota diferente por apartamento** (tipologia / permilagem), se aplicável ao prédio.
+- **B3. Crédito / pagamento adiantado**: o que se paga a mais fica como crédito e é abatido automaticamente nos meses seguintes.
+
+### C. Morador (página pública)
+
+- **C1. Visão pessoal do morador** (mockups M0/M1 da revisão UI/UX): escolher o apartamento uma vez, ficar guardado no telemóvel (ou link `?apt=3B`) e abrir logo na situação pessoal — "login único e visão única".
+- **C2. Como pagar**: IBAN, titular, descritivo a usar e botão para enviar o comprovativo ao gestor (precisa de novos campos na aba ⚙️ Configurações).
+- **C3. Aviso em destaque** no topo da página pública (último aviso dos últimos 30 dias).
+- **C4. Instalar no telemóvel (PWA)**: `manifest.json` e ícone para "Adicionar ao ecrã principal".
+- **C5. Histórico pessoal**: o morador vê os pagamentos que fez e descarrega os recibos.
+
+### D. Documentos e comprovativos
+
+- **D1. Recibo de pagamento** para imprimir ou enviar por WhatsApp depois de registar uma quota.
+- **D2. Anexar factura a despesas e comprovativo a pagamentos** (foto/PDF no Google Drive).
+- **D3. Partilhar relatório em PDF directamente** (hoje: imprimir → Guardar como PDF → partilhar).
+- **D4. Arquivo de documentos** na página pública: actas, regulamento, seguros, contratos.
+
+### E. Finanças do condomínio
+
+- **E1. Outras receitas** além de quotas e contribuições (aluguer de espaços, juros, reembolsos).
+- **E2. Orçamento anual** vs real, por categoria.
+- **E3. Fundo de reserva** separado do saldo corrente.
+- **E4. Despesas recorrentes** (limpeza, água, luz) com lembrete ou lançamento automático.
+- **E5. Fornecedores**: contactos, contratos e histórico de pagamentos.
+
+### F. Comunicação
+
+- **F1. Lembretes em lote**: preparar as mensagens de WhatsApp para todos os devedores de uma vez, filtradas por nível de atraso.
+- **F2. Assembleias**: convocatória, ordem de trabalhos, presenças e votações, com a acta ligada ao aviso.
+- **F3. Ocorrências / manutenção**: o morador reporta um problema (elevador, fuga de água) e o gestor acompanha o estado.
+
+### G. Gestão e segurança
+
+- **G1. Registo de alterações**: quem criou, editou ou apagou o quê e quando.
+- **G2. Vários utilizadores com perfis** (gestor, tesoureiro, só leitura para a comissão de fiscalização).
+- **G3. Cópia de segurança automática** da folha (cópia periódica no Drive).
+- **G4. Fecho de mês / ano**: bloquear edições em períodos já aprovados em assembleia.
+- **G5. Apagar ou arquivar apartamentos** (hoje só se cria e edita).
 
 ## 📌 Notas
 
