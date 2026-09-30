@@ -97,6 +97,7 @@ fica vazio e a página pública continua a receber os nomes.
 
 ## 🕒 Pendentes para próximas versões
 
+- **Rever o "Em dívida (total)" do painel do gestor** (`src/Gestor.jsx`, `totQ`/`totC`): não se percebe de onde sai o valor (ex.: 1 930 000 Kz = Quotas 650 000 + Contribuições 1 280 000). Deve ser só dívida de quotas + dívida das contribuições **abertas**; confirmar que as fechadas não entram e mostrar o detalhe (tocar no cartão → lista por apartamento/contribuição).
 - **Visão pessoal do morador** (mockups M0/M1 da revisão UI/UX): escolher o apartamento uma vez, ficar guardado no telemóvel (ou link `?apt=3B`) e abrir logo na situação pessoal — "login único e visão única".
 - **Como pagar** na página pública: IBAN, titular, descritivo a usar e botão para enviar o comprovativo ao gestor (precisa de novos campos na aba ⚙️ Configurações).
 - **Aviso em destaque** no topo da página pública (último aviso dos últimos 30 dias).
