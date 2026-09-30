@@ -66,7 +66,7 @@ function pagina(titulo, subtitulo, corpo, config, opts={}) {
 ${subtitulo?`<div class="meta" style="text-align:right">${subtitulo}</div>`:""}</div>
 ${corpo}
 ${opts.aprovacao?`<div class="aprov"><p>Apresentado em assembleia de ____ / ____ / ________.</p><div class="ass"><div>O gestor</div><div>Pelos condóminos</div></div></div>`:""}
-<div class="foot">${esc(predio)} · Relatório gerado pela app do condomínio a partir dos registos existentes a ${emitido}.</div>
+<div class="foot">${esc(predio)} · ${opts.rodape?esc(opts.rodape):`Relatório gerado pela app do condomínio a partir dos registos existentes a ${emitido}.`}</div>
 </div></body></html>`;
 }
 
@@ -309,4 +309,40 @@ export function descarregarHtml(html, nome) {
   const a = document.createElement("a"); a.href = url; a.download = nome.replace(/[^\w\-. ]+/g,"_") + ".html";
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RECIBO DE PAGAMENTO DE QUOTA (D1)
+   Um recibo junta os pagamentos do mesmo apartamento feitos no mesmo dia,
+   com o mesmo método e referência (ex.: vários meses de uma vez).
+═══════════════════════════════════════════════════════════════ */
+export function reciboDePagamento(appData, p) {
+  const { fracoes, pagamentosQuota } = appData;
+  const f = fracoes.find(x=>x.id===p.fracaoId);
+  const juntos = pagamentosQuota.filter(x=>x.fracaoId===p.fracaoId && x.metodo!=="Isento"
+    && (x.data||"")===(p.data||"") && (x.metodo||"")===(p.metodo||"") && (x.referencia||"")===(p.referencia||""));
+  return reciboNovo(f, { data:p.data, metodo:p.metodo, referencia:p.referencia,
+    meses: (juntos.length?juntos:[p]).map(x=>({mes:x.mes, ano:x.ano, valor:x.valor})) });
+}
+export function reciboNovo(f, { data, metodo, referencia, meses }) {
+  const ord = [...meses].sort((a,b)=>a.ano-b.ano||a.mes-b.mes);
+  return { f, data, metodo, referencia, meses: ord, total: ord.reduce((s,m)=>s+(+m.valor||0),0),
+    numero: `${String(data||today()).replace(/-/g,"")}-${String(f?.numero||"").replace(/\s+/g,"")}` };
+}
+export function relatorioRecibo(appData, rec) {
+  const { config } = appData;
+  const f = rec.f || {};
+  const corpo = `
+<div class="conta" style="grid-template-columns:repeat(3,1fr)">
+  <div><span>Apartamento</span><b>${esc(f.numero||"?")}</b></div>
+  <div><span>Data do pagamento</span><b>${esc(fmtDateNum(rec.data))||"—"}</b></div>
+  <div><span style="color:#1C1A16">Valor recebido</span><b>${kz(rec.total)} Kz</b></div>
+</div>
+<p style="margin-top:14px">Recebemos de <b>${esc(nomeApt(f)||"—")}</b>${f.inq_nome?` <span class="mut">(inquilino: ${esc(f.inq_nome)})</span>`:""} a quantia de <b>${kz(rec.total)} Kz</b>, referente a:</p>
+<table><thead><tr><th>Referente a</th><th class="n">Valor (Kz)</th></tr></thead><tbody>
+${rec.meses.map(m=>`<tr><td>Quota de ${MESES[m.mes-1]} ${m.ano}</td><td class="n">${kz(m.valor)}</td></tr>`).join("")}
+</tbody><tfoot><tr><td>Total</td><td class="n">${kz(rec.total)}</td></tr></tfoot></table>
+<p class="nota">Método: ${esc(rec.metodo||"—")}${rec.referencia?` · Referência: ${esc(rec.referencia)}`:""}</p>
+<div class="ass" style="grid-template-columns:1fr"><div style="max-width:280px">${esc(config.gestorNome||"O gestor")}</div></div>`;
+  return pagina("Recibo de pagamento", `N.º ${esc(rec.numero)}`, corpo, config, { rodape:`Recibo n.º ${rec.numero} emitido pela app do condomínio.` });
 }

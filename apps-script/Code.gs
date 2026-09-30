@@ -10,6 +10,11 @@
 //  • Valor da quota ao longo do tempo (B1): nova aba "💲 Valor da Quota"
 //    (ano, mes, valor_kz), criada automaticamente no primeiro registo.
 //    Cada valor vale a partir desse mês. Sem linhas, usa quota_mensal_kz.
+//  • Como pagar (C2): novas chaves opcionais na aba ⚙️ Configurações —
+//      pagamento_iban, pagamento_titular, pagamento_banco,
+//      pagamento_descritivo (ex.: "Quota apt {apt}"), pagamento_instrucoes,
+//      comprovativo_telefone (WhatsApp para onde os moradores enviam o
+//      comprovativo). São públicas: aparecem na página dos moradores.
 //
 //  NOVO — CONTRIBUIÇÕES FECHADAS
 //  • Uma contribuição com estado "Fechado" deixa de aceitar pagamentos
@@ -548,6 +553,14 @@ function lerDados() {
       mesBase:        parseInt(config["mes_inicio"] || "1")    || 1,
       multaAtraso:    num(config["multa_atraso_pct"]),
       quotaHistorico: readQuotaHistorico(),
+      pagamento: {
+        iban:       config["pagamento_iban"]       || "",
+        titular:    config["pagamento_titular"]    || "",
+        banco:      config["pagamento_banco"]      || "",
+        descritivo: config["pagamento_descritivo"] || "",
+        instrucoes: config["pagamento_instrucoes"] || "",
+        telefone:   config["comprovativo_telefone"] || "",
+      },
     },
     fracoes,
     pagamentosQuota:        quotasNorm,
@@ -572,6 +585,7 @@ function dadosPublicos(d) {
       anoBase:     d.config.anoBase,
       mesBase:     d.config.mesBase,
       quotaHistorico: d.config.quotaHistorico.map(h => ({ ano: h.ano, mes: h.mes, valor: h.valor })),
+      pagamento:      d.config.pagamento,
     },
     // Sem nomes: a página pública mostra só o nº do apartamento (v6)
     fracoes: d.fracoes.map(f => ({

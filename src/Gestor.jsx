@@ -3,13 +3,13 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, R
 import { MESES, MESES_S, CATS, AVISO_TIPOS, METODOS, ESTADOS_CONTRIB, today, chaveMes, lblMes,
   fmtKz, fmtNum, fmtSinal, fmtDate, fmtDateCurta, nomeApt, apiPost, waAbrir, msgLembrete, msgAviso,
   quotaInfo, estadoMes, nivelAtraso, contribInfo, contribFechada, ordenarContribs, metaContrib, situacaoApt, intervaloMeses, alocar, resumoMeses,
-  fluxoMensal, contaMes, serieMeses, cobrancaMes, rascunhoGet, rascunhoSet,
+  fluxoMensal, contaMes, serieMeses, cobrancaMes, rascunhoGet, rascunhoSet, msgRecibo,
   inativa, semQuota, quotaDoMes, quotaAtual, historicoQuota } from "./lib.js";
 import { Icon, WaSvg, Modal, FG, CheckRow, Warn, Info, ModalBtns, RowActions, MesSelect, AnoSelect, Segmented,
   MesNav, Menu, AptCombo, ConfirmModal, Toast } from "./ui.jsx";
 import { AvisoCard } from "./Publico.jsx";
 import { CentroRelatorios, ReportPreview } from "./Relatorios.jsx";
-import { relatorioExtracto } from "./relatoriosHtml.js";
+import { relatorioExtracto, relatorioRecibo, reciboDePagamento, reciboNovo } from "./relatoriosHtml.js";
 
 const TABS = [["painel","Painel","chart"],["quotas","Quotas","calendar"],["fracoes","Apartamentos","building"],["contribuicoes","Contribuições","list"],
   ["despesas","Despesas","receipt"],["avisos","Avisos","megaphone"],["relatorios","Relatórios","file"]];
@@ -128,6 +128,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
   const [fDAno,setFDAno]=useState(""); const [fDCat,setFDCat]=useState(""); const [fDTxt,setFDTxt]=useState("");
   const [abertos,setAbertos]=useState({});
   const [verDivida,setVerDivida]=useState(false);
+  const [recibo,setRecibo]=useState(null);
 
   const { config, fracoes, pagamentosQuota, contribuicoes, pagamentosContribuicao, despesas, avisos=[] } = appData;
   const { anoBase, mesBase } = config;
@@ -269,8 +270,10 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
     if(!form.data) return fail("Indique a data do pagamento","data");
     const linhas=meses.map((m,i)=>({...m,valor:valores[i]})).filter(m=>m.valor>0);
     const reset = ()=>setForm(p=>({data:p.data,metodo:p.metodo,sel:[],anoVista:p.anoVista,valor:"",fracaoNum:""}));
+    const rec = reciboNovo(f, {data:form.data, metodo:form.metodo||"", referencia:form.referencia||"", meses:linhas});
     post("add_pagamentos_quota",{fracao_numero:f.numero,data:form.data,metodo:form.metodo||"",referencia:form.referencia||"",meses:linhas},
-      { close:!novo, msgOk:`Registado: ${f.numero} · ${resumoMeses(linhas)} · ${fmtKz(total)}`, onDone: novo?reset:undefined });
+      { close:!novo, msgOk:`Registado: ${f.numero} · ${resumoMeses(linhas)} · ${fmtKz(total)}`, onDone: novo?reset:undefined,
+        toastAction:{label:"Recibo", fn:()=>setRecibo(rec)} });
   };
   const submitEditQuota = ()=>{
     const f=aptByNum(form.fracaoNum);
@@ -462,6 +465,16 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
       {drillApt&&<DrillModal fracao={drillApt} appData={appData} onClose={()=>setDrillApt(null)}
         onRegistar={()=>{ const n=drillApt.numero; setDrillApt(null); abrirQuota(n); }}
         onExtracto={()=>{ const f=drillApt; setDrillApt(null); setExtracto(f); }}/>}
+      {recibo&&<Modal title={`Recibo — ${recibo.f?.numero||""}`} onClose={()=>setRecibo(null)} lg>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {(recibo.f?.prop_telefone||recibo.f?.telefone)&&<button className="wa-btn" onClick={()=>waAbrir(recibo.f.prop_telefone||recibo.f.telefone,msgRecibo(recibo,nomeApt(recibo.f),config))}><WaSvg s={15}/>Enviar ao proprietário</button>}
+            {recibo.f?.inq_telefone&&<button className="wa-btn" onClick={()=>waAbrir(recibo.f.inq_telefone,msgRecibo(recibo,recibo.f.inq_nome,config))}><WaSvg s={15}/>Enviar ao inquilino</button>}
+            <button className="wa-btn" onClick={()=>waAbrir("",msgRecibo(recibo,"",config))}><WaSvg s={15}/>Escolher contacto</button>
+          </div>
+          <ReportPreview html={relatorioRecibo(appData, recibo)} nome={`Recibo ${recibo.numero}`} altura="58vh"/>
+        </div>
+      </Modal>}
       {extracto&&<Modal title={`Extracto — ${extracto.numero}`} onClose={()=>setExtracto(null)} lg>
         <ReportPreview html={relatorioExtracto(appData, extracto.id)} nome={`Extracto ${extracto.numero}`} altura="62vh"/>
       </Modal>}
@@ -683,7 +696,9 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
           <td>{p.mes&&p.ano?<span className="tag tag-blue">{MESES_S[p.mes-1]} {p.ano}</span>:<span className="tag tag-red">Sem mês</span>}</td>
           <td className="num">{p.metodo==="Isento"?"—":fmtNum(p.valor)}</td>
           <td className="hide-sm muted" style={{fontSize:13}}>{p.metodo==="Isento"?<span className="tag tag-grey" title={p.referencia}>Isento</span>:(p.metodo||"—")}</td>
-          <td><RowActions desc={`pagamento do ${f?.numero||""}`} onEdit={()=>abrirEditQuota(p)} onDelete={()=>apagarQuota(p)}/></td>
+          <td><div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
+            {p.metodo!=="Isento"&&<button className="btn btn-ghost btn-icon btn-sm" onClick={()=>setRecibo(reciboDePagamento(appData,p))} aria-label={`Recibo do pagamento do ${f?.numero||""}`} title="Recibo"><Icon n="file" s={16}/></button>}
+            <RowActions desc={`pagamento do ${f?.numero||""}`} onEdit={()=>abrirEditQuota(p)} onDelete={()=>apagarQuota(p)}/></div></td>
         </tr>; })}</tbody></table>
         {histList.length===0&&<div style={{textAlign:"center",padding:24,color:"var(--ink-2)"}}>Sem registos.</div>}
       </section>}
@@ -712,7 +727,10 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
                   <b style={{fontSize:14}}>{p.metodo==="Isento"?"Isenção":fmtKz(p.valor)}</b>
                   <span className="muted" style={{fontSize:13}}>{[fmtDate(p.data),p.metodo!=="Isento"&&p.metodo,p.referencia].filter(Boolean).join(" · ")}</span>
                 </span>
-                <RowActions desc="registo" onEdit={p.metodo==="Isento"?null:()=>{ fechar(); abrirEditQuota(p); }} onDelete={()=>{ fechar(); apagarQuota(p); }}/>
+                <span style={{display:"flex",gap:6,alignItems:"center"}}>
+                  {p.metodo!=="Isento"&&<button className="btn btn-outline btn-sm" onClick={()=>{ fechar(); setRecibo(reciboDePagamento(appData,p)); }}><Icon n="file" s={15}/>Recibo</button>}
+                  <RowActions desc="registo" onEdit={p.metodo==="Isento"?null:()=>{ fechar(); abrirEditQuota(p); }} onDelete={()=>{ fechar(); apagarQuota(p); }}/>
+                </span>
               </div>
             ))}
           </div>}

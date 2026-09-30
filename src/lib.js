@@ -94,6 +94,14 @@ export function msgLembrete(f, nome, qi, contribs, config) {
   linhas.push("", `*Total em dívida: ${fmtKz(total)}*`, "", "Agradecemos a regularização com a maior brevidade possível.", "", `${config.gestorNome||"A gestão"}`);
   return linhas.join("\n");
 }
+// Recibo por WhatsApp (D1) — rec vem de reciboNovo / reciboDePagamento
+export function msgRecibo(rec, nome, config) {
+  return [`🏢 *${config.predio}*`, "", `*Recibo de pagamento n.º ${rec.numero}*`, "",
+    `Caro(a) ${nome||nomeApt(rec.f)},`, "",
+    `Confirmamos a recepção de *${fmtKz(rec.total)}* do apartamento *${rec.f?.numero}*, pago a ${fmtDate(rec.data)}${rec.metodo?` (${rec.metodo})`:""}, referente a:`,
+    ...rec.meses.map(m=>`• Quota ${MESES[m.mes-1]} ${m.ano}: ${fmtKz(m.valor)}`),
+    "", "Obrigado.", "", `${config.gestorNome||"A gestão"}`].join("\n");
+}
 export function msgAviso(a, config) {
   const url = window.location.origin + window.location.pathname;
   return [`📢 *${config.predio}*`, "", `*${a.tipo}: ${a.titulo}*`, a.data ? fmtDate(a.data) : "", "", a.conteudo||"", "", `Mais informação: ${url}`]

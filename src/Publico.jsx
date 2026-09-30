@@ -1,9 +1,9 @@
 import { useState, useMemo } from "react";
 import { APP_VERSAO, MESES, fmtKz, fmtNum, fmtSinal, fmtDate, fmtDateCurta, fmtDateTime, today, chaveMes,
   quotaInfo, contribInfo, contribFechada, metaContrib, situacaoApt, nivelAtraso, resumoMeses, andarDe, nomeAndar,
-  fluxoMensal, contaMes, primeiroMes, temContas, inativa, quotaAtual } from "./lib.js";
+  fluxoMensal, contaMes, primeiroMes, temContas, inativa, quotaAtual, stGet, stSet, stDel, waAbrir } from "./lib.js";
 import { relatorioMensal } from "./relatoriosHtml.js";
-import { Icon, Modal, MesNav } from "./ui.jsx";
+import { Icon, Modal, MesNav, WaSvg } from "./ui.jsx";
 import { ReportPreview } from "./Relatorios.jsx";
 
 const TIPO_TAG = { "Notificação":"tag-blue", "Acta de Reunião":"tag-green", "Comunicado":"tag-amber" };
@@ -37,17 +37,67 @@ export function AvisoCard({a, extra}) {
 /* ═══════════════════════════════════════════════════════════════
    VER O MEU APARTAMENTO (pesquisa pelo número)
 ═══════════════════════════════════════════════════════════════ */
-function MeuApartamento({appData}) {
-  const [q,setQ] = useState("");
+// Copiar texto (IBAN, link); devolve true se conseguiu
+async function copiar(txt) {
+  try { await navigator.clipboard.writeText(txt); return true; }
+  catch(_) {
+    try { const t=document.createElement("textarea"); t.value=txt; document.body.appendChild(t); t.select(); const ok=document.execCommand("copy"); t.remove(); return ok; }
+    catch(_) { return false; }
+  }
+}
+const linkApt = (num) => `${window.location.origin}${window.location.pathname}?apt=${encodeURIComponent(num)}`;
+
+/* ═══════════════════════════════════════════════════════════════
+   COMO PAGAR (C2) — dados da aba ⚙️ Configurações (pagamento_*)
+═══════════════════════════════════════════════════════════════ */
+export function ComoPagar({appData, f, valor, compacto}) {
+  const { config } = appData;
+  const pg = config.pagamento || {};
+  const [copiado,setCopiado] = useState("");
+  if (!pg.iban && !pg.instrucoes) return null;
+  const descritivo = (pg.descritivo || "Apt {apt}").replace(/\{apt\}/gi, f?.numero || "(nº do apartamento)");
+  const copia = async (k, txt) => { if (await copiar(txt)) { setCopiado(k); setTimeout(()=>setCopiado(c=>c===k?"":c), 2500); } };
+  const s = f ? situacaoApt(f, appData) : null;
+  const msgComprovativo = () => [`🏢 *${config.predio}*`, "",
+    `Olá, envio o comprovativo de pagamento${f?` do apartamento *${f.numero}*`:""}.`,
+    valor ? `Valor: ${fmtKz(valor)}` : "",
+    s && s.qi.mesesEmFalta.length ? `Referente a: ${resumoMeses(s.qi.mesesEmFalta)}${s.contribs.length?" e "+s.contribs.map(c=>c.titulo).join(", "):""}` : "",
+    "", "(anexe aqui a fotografia ou o PDF do comprovativo)"].filter((l,i,a)=>l!==""||a[i-1]!=="").join("\n");
+  const linha = (k, rot, v, mono) => v ? (
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"6px 0",borderBottom:"1px solid var(--line-2)"}}>
+      <span style={{display:"flex",flexDirection:"column",minWidth:0}}>
+        <span style={{fontSize:12,fontWeight:700,color:"var(--ink-2)"}}>{rot}</span>
+        <span className={mono?"mono":""} style={{fontSize:mono?14:15,fontWeight:mono?400:700,wordBreak:"break-all"}}>{v}</span>
+      </span>
+      <button className="btn btn-outline btn-sm" onClick={()=>copia(k,v)} aria-label={`Copiar ${rot}`} style={{flexShrink:0}}>
+        <Icon n={copiado===k?"check":"copy"} s={15}/>{copiado===k?"Copiado":"Copiar"}</button>
+    </div>) : null;
+  return (
+    <section className={compacto?"":"card anim"} style={{display:"flex",flexDirection:"column",gap:6,...(compacto?{background:"var(--surface-2)",border:"1px solid var(--line)",borderRadius:12,padding:"10px 14px"}:{})}} aria-label="Como pagar">
+      <h2 className={compacto?"":"h2"} style={compacto?{fontWeight:800,fontSize:15}:undefined}>Como pagar</h2>
+      {linha("iban","IBAN",pg.iban,true)}
+      {linha("tit","Titular",pg.titular)}
+      {pg.banco&&<div style={{fontSize:14,padding:"4px 0"}}><span className="muted">Banco:</span> {pg.banco}</div>}
+      {linha("desc","Descritivo a usar na transferência",descritivo)}
+      {pg.instrucoes&&<p style={{fontSize:14,color:"#3D3832",lineHeight:1.5,whiteSpace:"pre-wrap",marginTop:4}}>{pg.instrucoes}</p>}
+      {pg.telefone&&<button className="wa-btn" style={{alignSelf:"flex-start",marginTop:6}} onClick={()=>waAbrir(pg.telefone,msgComprovativo())}><WaSvg s={15}/>Enviar comprovativo ao gestor</button>}
+    </section>
+  );
+}
+
+function MeuApartamento({appData, guardado, onGuardar}) {
+  const [q,setQ] = useState(guardado||"");
+  const [linkOk,setLinkOk] = useState(false);
   const { fracoes } = appData;
   const termo = q.trim().toLowerCase();
   const f = termo ? (fracoes.find(x=>String(x.numero).trim().toLowerCase()===termo)
                   || (()=>{ const c=fracoes.filter(x=>String(x.numero).trim().toLowerCase().startsWith(termo)); return c.length===1?c[0]:null; })()) : null;
   const s = f ? situacaoApt(f, appData) : null;
+  const eMeu = f && guardado && String(f.numero)===String(guardado);
   return (
-    <section className="card anim" style={{marginBottom:16}} aria-label="Ver o meu apartamento">
+    <section className="card anim" style={{marginBottom:16,...(eMeu?{border:"2px solid var(--ink)"}:{})}} aria-label="O meu apartamento">
       <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-        <label htmlFor="meu-apt" style={{fontWeight:800,fontSize:15,display:"flex",gap:8,alignItems:"center"}}><Icon n="search" s={18}/>Ver o meu apartamento</label>
+        <label htmlFor="meu-apt" style={{fontWeight:800,fontSize:15,display:"flex",gap:8,alignItems:"center"}}><Icon n={eMeu?"home":"search"} s={18}/>{guardado?"O meu apartamento":"Ver o meu apartamento"}</label>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
           <input id="meu-apt" className="input" style={{width:170}} placeholder="Nº do apartamento" value={q} onChange={e=>setQ(e.target.value)}/>
           {q&&<button className="btn btn-ghost btn-icon" onClick={()=>setQ("")} aria-label="Limpar"><Icon n="x" s={18}/></button>}
@@ -85,6 +135,16 @@ function MeuApartamento({appData}) {
               ))}
             </div>
           )}
+          {s.total>0&&<ComoPagar appData={appData} f={f} valor={s.total} compacto/>}
+          {/* C1 — guardar o apartamento neste telemóvel e partilhar o link pessoal */}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",borderTop:"1px solid var(--line-2)",paddingTop:10}}>
+            {eMeu
+              ? <><span className="tag tag-green"><Icon n="check" s={12}/> Guardado neste telemóvel</span>
+                  <button className="btn btn-ghost btn-sm" onClick={()=>{ onGuardar(null); setQ(""); }}>Esquecer</button></>
+              : <button className="btn btn-outline btn-sm" onClick={()=>onGuardar(f.numero)}><Icon n="home" s={15}/>Este é o meu apartamento</button>}
+            <button className="btn btn-ghost btn-sm" onClick={async()=>{ if(await copiar(linkApt(f.numero))){ setLinkOk(true); setTimeout(()=>setLinkOk(false),2500); } }}>
+              <Icon n={linkOk?"check":"copy"} s={15}/>{linkOk?"Link copiado":"Copiar o meu link"}</button>
+          </div>
         </div>
       )}
     </section>
@@ -349,8 +409,21 @@ function Contas({appData}) {
 /* ═══════════════════════════════════════════════════════════════
    PÁGINA PÚBLICA
 ═══════════════════════════════════════════════════════════════ */
+// Apartamento guardado no telemóvel (C1): ?apt=3B no link, ou escolhido uma vez na página
+function lerMeuApt() {
+  try {
+    const q = new URLSearchParams(window.location.search).get("apt");
+    if (q) { stSet("condo_meu_apt", q); return q; }
+  } catch(_) {}
+  return stGet("condo_meu_apt") || null;
+}
+
 export function PublicView({appData, offline, onGestor}) {
   const [tab,setTab] = useState("quotas");
+  const [meuApt,setMeuAptSt] = useState(lerMeuApt);
+  const fMeu = meuApt ? appData.fracoes.find(f=>String(f.numero)===String(meuApt)) || null : null;
+  const existe = !!fMeu;
+  const setMeuApt = (n)=>{ if(n) stSet("condo_meu_apt", n); else stDel("condo_meu_apt"); setMeuAptSt(n); };
   const { config, avisos=[] } = appData;
   const avisosSorted = [...avisos].sort((a,b)=>(b.data||"").localeCompare(a.data||""));
   // O contador conta os avisos recentes de todos os tipos — os mesmos que o separador marca como "Novo"
@@ -379,8 +452,10 @@ export function PublicView({appData, offline, onGestor}) {
       </nav>
 
       <main style={{maxWidth:840,margin:"0 auto",padding:"16px 16px 8px"}}>
-        {tab!=="contas"&&tab!=="avisos"&&<MeuApartamento appData={appData}/>}
+        {tab!=="contas"&&tab!=="avisos"&&<MeuApartamento key={existe?meuApt:"-"} appData={appData} guardado={existe?meuApt:null} onGuardar={setMeuApt}/>}
         {tab==="quotas"&&<PredioQuotas appData={appData}/>}
+        {/* "Como pagar" no fim da página, excepto quando já aparece no cartão do meu apartamento (com dívida) */}
+        {tab==="quotas"&&!(fMeu&&situacaoApt(fMeu,appData).total>0)&&<div style={{marginTop:16}}><ComoPagar appData={appData} f={fMeu}/></div>}
         {tab==="contribuicoes"&&<PublicContribuicoes appData={appData}/>}
         {tab==="contas"&&<Contas appData={appData}/>}
         {tab==="avisos"&&<div className="anim" style={{display:"flex",flexDirection:"column",gap:10}}>
