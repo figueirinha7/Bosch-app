@@ -5,7 +5,7 @@
    repetido em cada página, linhas nunca cortadas a meio, nº de página.
 ════════════════════════════════════════════════════════════════ */
 import { MESES, MESES_S, pad2, chaveMes, fmtNum, fmtSinal, fmtDateNum, fmtDateCurta, nomeApt, lblMes,
-  fluxoMensal, contaMes, cobrancaMes, situacaoApt, contribInfo, metaContrib, mesCaixaQuota, resumoMeses, today } from "./lib.js";
+  fluxoMensal, contaMes, cobrancaMes, situacaoApt, contribInfo, metaContrib, mesCaixaQuota, resumoMeses, today, inativa, quotaAtual } from "./lib.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
 const kz  = v => fmtNum(v);
@@ -162,7 +162,8 @@ ${publico?"":`<div class="chk"><i></i>Confere com o extracto bancário de ${pad2
 <h2>2. Cobrança das quotas de ${esc(nomeMes)}</h2>
 <p>${cob.pagaram} de ${cob.elegiveis} apartamentos pagaram a quota do mês (${pct}%): <b>${kz(cob.cobrado)}</b> de ${kz(cob.esperado)} Kz.
 ${cob.isentos?` ${cob.isentos} ${cob.isentos===1?"apartamento isento":"apartamentos isentos"} neste mês.`:""}
-${cob.excluidos.length?` ${cob.excluidos.length===1?"O apartamento":"Os apartamentos"} ${cob.excluidos.map(f=>esc(f.numero)).join(", ")} não ${cob.excluidos.length===1?"paga":"pagam"} quota mensal (acordo com a administração).`:""}</p>
+${cob.excluidos.length?` ${cob.excluidos.length===1?"O apartamento":"Os apartamentos"} ${cob.excluidos.map(f=>esc(f.numero)).join(", ")} não ${cob.excluidos.length===1?"paga":"pagam"} quota mensal (acordo com a administração).`:""}
+${cob.inativos.length?` ${cob.inativos.length===1?"O apartamento":"Os apartamentos"} ${cob.inativos.map(f=>esc(f.numero)).join(", ")} ${cob.inativos.length===1?"está inactivo":"estão inactivos"}.`:""}</p>
 <div class="bar"><i style="width:${pct}%"></i></div>
 ${cob.emFalta.length?`<p class="nota" style="margin-top:6px">Por pagar: ${cob.emFalta.map(x=>esc(x.f.numero)+(x.k==="parcial"?` (parcial, pagou ${kz(x.pago)})`:"")).join(", ")}.</p>`:""}
 <p class="nota">A cobrança conta pelo mês a que a quota se refere; as entradas abaixo contam pela data em que o dinheiro entrou.</p>
@@ -207,7 +208,7 @@ export function relatorioAnual(appData, ano, opts={}) {
   const contribRows = contribuicoes.map(c=>{
     const meta = metaContrib(c, fracoes);
     const rec = pagamentosContribuicao.filter(p=>p.contribuicaoId===c.id&&p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
-    const falta = fracoes.reduce((s,f)=>s+contribInfo(c,f.id,pagamentosContribuicao).divida,0);
+    const falta = fracoes.reduce((s,f)=>s+contribInfo(c,f,pagamentosContribuicao).divida,0);
     return `<tr><td>${esc(c.titulo)}${c.dataVencimento?` <span class="mut">· prazo ${esc(fmtDateNum(c.dataVencimento))}</span>`:""}</td><td class="n">${meta?kz(meta):"livre"}</td><td class="n">${kz(rec)}</td><td class="n">${falta?kz(falta):"—"}</td><td>${esc(c.estado||"Aberto")}</td></tr>`;
   }).join("");
 
@@ -276,7 +277,7 @@ export function relatorioExtracto(appData, fracaoId) {
 <div class="conta" style="grid-template-columns:repeat(3,1fr);margin-top:10px">
   <div><span>Pago (todos os registos)</span><b>${kz(totalPago)} Kz</b></div>
   <div style="background:#fff"><span style="color:#9E2D16">Em dívida</span><b class="neg">${kz(total)} Kz</b></div>
-  <div style="background:#fff"><span>Quota mensal</span><b>${f.excluiQuota?"Não paga":kz(config.quotaMensal)+" Kz"}</b></div>
+  <div style="background:#fff"><span>Quota mensal</span><b>${inativa(f)?"Inactivo":f.excluiQuota?"Não paga":kz(quotaAtual(config))+" Kz"}</b></div>
 </div>
 
 <h2>Pagamentos registados</h2>

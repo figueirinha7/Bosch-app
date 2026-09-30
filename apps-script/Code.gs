@@ -1,8 +1,15 @@
 // ═══════════════════════════════════════════════════════════════
-//  CONDOMÍNIO — Google Apps Script API  v6
+//  CONDOMÍNIO — Google Apps Script API  v7-beta
 //  Cole este código em: script.google.com → projecto ligado ao Sheets
 //  Depois: Implementar → Gerir implementações → editar → Nova versão
 //          (Executar como: Eu · Acesso: Qualquer pessoa)
+//
+//  NOVO NA v7
+//  • Apartamentos inactivos (A2): fracao_ativa passa a poder ser editada
+//    pela app (edit_fracao). "Não" = não paga quotas nem contribuições.
+//  • Valor da quota ao longo do tempo (B1): nova aba "💲 Valor da Quota"
+//    (ano, mes, valor_kz), criada automaticamente no primeiro registo.
+//    Cada valor vale a partir desse mês. Sem linhas, usa quota_mensal_kz.
 //
 //  NOVO — CONTRIBUIÇÕES FECHADAS
 //  • Uma contribuição com estado "Fechado" deixa de aceitar pagamentos
@@ -36,7 +43,7 @@
 //  • Editar e apagar lançamentos (quotas, contribuições, despesas, avisos).
 // ═══════════════════════════════════════════════════════════════
 
-const VERSAO         = "v6";
+const VERSAO         = "v7-beta";
 const SS             = SpreadsheetApp.getActiveSpreadsheet();
 const PROPS          = PropertiesService.getScriptProperties();
 const SESSAO_HORAS   = 8;   // duração de uma sessão de gestor
@@ -51,6 +58,7 @@ const ABA = {
   PGC:      "✅ Pgtos. Contribuições",
   DESPESAS: "🧾 Despesas",
   AVISOS:   "📢 Avisos",
+  QVAL:     "💲 Valor da Quota",
 };
 
 // Esquema de colunas de cada aba: campo → [cabeçalho, coluna por omissão].
@@ -120,6 +128,11 @@ const ESQUEMA = {
     data:     ["data", 4],
     autor:    ["autor", 5],
     id:       ["id", 6],
+  }},
+  QVAL: { aba: ABA.QVAL, hdr: 4, campos: {
+    ano:   ["ano", 1],
+    mes:   ["mes", 2],
+    valor: ["valor_kz", 3],
   }},
 };
 
@@ -262,6 +275,25 @@ function ensureAvisosSheet() {
     sheet.getRange(4, 1, 1, 6).setFontWeight("bold");
   }
   return sheet;
+}
+
+
+// ── ABA VALOR DA QUOTA (cria se não existir) ─────────────────────
+function ensureQuotaSheet() {
+  let sheet = SS.getSheetByName(ABA.QVAL);
+  if (!sheet) {
+    sheet = SS.insertSheet(ABA.QVAL);
+    sheet.getRange(1, 1).setValue("Valor da quota mensal ao longo do tempo").setFontWeight("bold");
+    sheet.getRange(2, 1).setValue("Cada linha vale a partir desse mês (ano, mês). Sem linhas, a app usa quota_mensal_kz das Configurações.");
+    sheet.getRange(4, 1, 1, 3).setValues([["ano", "mes", "valor_kz"]]).setFontWeight("bold");
+  }
+  return sheet;
+}
+
+function readQuotaHistorico() {
+  return sheetToObjects(ABA.QVAL)
+    .map(h => ({ ano: parseInt(h["ano"]) || 0, mes: parseInt(h["mes"]) || 0, valor: num(h["valor_kz"]), _row: h._row, _sig: h._sig }))
+    .filter(h => h.ano > 2000 && h.mes >= 1 && h.mes <= 12);
 }
 
 
@@ -515,6 +547,7 @@ function lerDados() {
       anoBase:        parseInt(config["ano_inicio"] || "2025") || 2025,
       mesBase:        parseInt(config["mes_inicio"] || "1")    || 1,
       multaAtraso:    num(config["multa_atraso_pct"]),
+      quotaHistorico: readQuotaHistorico(),
     },
     fracoes,
     pagamentosQuota:        quotasNorm,
@@ -538,6 +571,7 @@ function dadosPublicos(d) {
       quotaMensal: d.config.quotaMensal,
       anoBase:     d.config.anoBase,
       mesBase:     d.config.mesBase,
+      quotaHistorico: d.config.quotaHistorico.map(h => ({ ano: h.ano, mes: h.mes, valor: h.valor })),
     },
     // Sem nomes: a página pública mostra só o nº do apartamento (v6)
     fracoes: d.fracoes.map(f => ({
@@ -594,7 +628,7 @@ function entradasMensais(d) {
 function acrescentar(chave, registos) {
   if (!registos.length) return 0;
   const esq   = ESQUEMA[chave];
-  const sheet = chave === "AVISOS" ? ensureAvisosSheet() : getSheet(esq.aba);
+  const sheet = chave === "AVISOS" ? ensureAvisosSheet() : chave === "QVAL" ? ensureQuotaSheet() : getSheet(esq.aba);
   const campos = Object.keys(esq.campos).filter(k => registos.some(r => r[k] !== undefined));
   const cols  = resolverColunas(esq, sheet, true);
   const largura = Math.max.apply(null, campos.map(k => cols[k]).concat([1]));
@@ -723,7 +757,7 @@ function executar(action, data) {
         prop_email: data.prop_email || "", prop_nif: data.prop_nif || "",
         inq_nome: data.inq_nome || "", inq_telefone: data.inq_telefone || "",
         inq_email: data.inq_email || "", inq_inicio_contrato: data.inq_inicio_contrato || "",
-        fracao_ativa: "Sim", exclui_quota: data.exclui_quota || "Não",
+        fracao_ativa: data.fracao_ativa === "Não" ? "Não" : "Sim", exclui_quota: data.exclui_quota || "Não",
         observacoes: data.observacoes || "",
       }]);
       return { ok: true, row };
@@ -737,7 +771,7 @@ function executar(action, data) {
       if (data.prop_nome !== undefined) exigir(String(data.prop_nome).trim(), "O nome do proprietário não pode ficar vazio");
       const row = editar("FRACOES", data, [
         "numero", "andar", "prop_nome", "prop_telefone", "prop_email", "prop_nif",
-        "inq_nome", "inq_telefone", "inq_email", "inq_inicio_contrato", "exclui_quota", "observacoes",
+        "inq_nome", "inq_telefone", "inq_email", "inq_inicio_contrato", "fracao_ativa", "exclui_quota", "observacoes",
       ]);
       return { ok: true, row };
     }
@@ -783,6 +817,25 @@ function executar(action, data) {
       })));
       return { ok: true, row, count: meses.length };
     }
+
+    // ── VALOR DA QUOTA (B1) ─────────────────────────────────────
+    // valores = [{ano, mes, valor}, ...] — cada um vale a partir desse mês
+    case "add_valor_quota": {
+      const valores = data.valores || (data.ano ? [{ ano: data.ano, mes: data.mes, valor: data.valor }] : []);
+      exigir(valores.length > 0, "Indique o valor e o mês");
+      const existentes = readQuotaHistorico();
+      valores.forEach(v => {
+        exigir(parseInt(v.mes) >= 1 && parseInt(v.mes) <= 12 && parseInt(v.ano) > 2000, "Mês inválido");
+        exigir(Number(v.valor) > 0, "O valor tem de ser maior que zero");
+        exigir(!existentes.some(h => h.ano === parseInt(v.ano) && h.mes === parseInt(v.mes)),
+          "Já existe um valor para " + v.mes + "/" + v.ano);
+      });
+      const row = acrescentar("QVAL", valores.map(v => ({ ano: parseInt(v.ano), mes: parseInt(v.mes), valor: Number(v.valor) })));
+      return { ok: true, row, count: valores.length };
+    }
+
+    case "delete_valor_quota":
+      return { ok: true, row: apagar("QVAL", data) };
 
     // ── CONTRIBUIÇÕES ───────────────────────────────────────────
     case "add_contribuicao": {

@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { APP_VERSAO, MESES, fmtKz, fmtNum, fmtSinal, fmtDate, fmtDateCurta, fmtDateTime, today, chaveMes,
   quotaInfo, contribInfo, contribFechada, metaContrib, situacaoApt, nivelAtraso, resumoMeses, andarDe, nomeAndar,
-  fluxoMensal, contaMes, primeiroMes, temContas } from "./lib.js";
+  fluxoMensal, contaMes, primeiroMes, temContas, inativa, quotaAtual } from "./lib.js";
 import { relatorioMensal } from "./relatoriosHtml.js";
 import { Icon, Modal, MesNav } from "./ui.jsx";
 import { ReportPreview } from "./Relatorios.jsx";
@@ -58,9 +58,11 @@ function MeuApartamento({appData}) {
         <div style={{marginTop:14,display:"flex",flexDirection:"column",gap:12}} aria-live="polite">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
             <span className="serif" style={{fontWeight:700,fontSize:22}}>Apartamento {f.numero}</span>
-            <span className={`tag ${s.total>0?"tag-red":"tag-green"}`}>{s.total>0?`Em dívida: ${fmtKz(s.total)}`:"Tudo em dia"}</span>
+            {inativa(f)?<span className="tag tag-grey">Inactivo</span>
+              :<span className={`tag ${s.total>0?"tag-red":"tag-green"}`}>{s.total>0?`Em dívida: ${fmtKz(s.total)}`:"Tudo em dia"}</span>}
           </div>
-          {f.excluiQuota&&<div style={{fontSize:14,color:"var(--ink-2)"}}>Este apartamento não paga quota mensal (acordo com a administração).</div>}
+          {inativa(f)?<div style={{fontSize:14,color:"var(--ink-2)"}}>Apartamento inactivo: não paga quotas nem contribuições.</div>
+            :f.excluiQuota&&<div style={{fontSize:14,color:"var(--ink-2)"}}>Este apartamento não paga quota mensal (acordo com a administração).</div>}
           {s.qi.mesesEmFalta.length>0&&(
             <div>
               <div style={{fontSize:14,fontWeight:800,marginBottom:6}}>Quotas em falta ({s.qi.mesesAtraso})</div>
@@ -97,13 +99,14 @@ const CEL = {
   um:  { background:"var(--warn-bg)", border:"2px solid var(--warn-line)", color:"#7A4109" },
   mau: { background:"var(--divida-bg)", border:"2px solid var(--brand)", color:"var(--divida)" },
   exc: { background:"var(--grey-bg)", border:"1.5px solid var(--grey-bg)", color:"#4A443D" },
+  ina: { background:"#fff", border:"1.5px dashed var(--line-3)", color:"var(--ink-3)" },
 };
 const numCmp = (a,b)=>String(a.numero).localeCompare(String(b.numero),"pt",{numeric:true});
 
 function PredioQuotas({appData}) {
   const { fracoes, pagamentosQuota, config } = appData;
   const [sel,setSel] = useState(null);
-  const infos = useMemo(()=>fracoes.map(f=>({ f, qi: f.excluiQuota ? null : quotaInfo(f.id,pagamentosQuota,config.quotaMensal,config.anoBase,config.mesBase) })),
+  const infos = useMemo(()=>fracoes.map(f=>({ f, ina: inativa(f), qi: f.excluiQuota||inativa(f) ? null : quotaInfo(f.id,pagamentosQuota,config) })),
     [fracoes,pagamentosQuota,config]);
   const pagam = infos.filter(x=>x.qi);
   const emDia = pagam.filter(x=>x.qi.mesesAtraso===0).length;
@@ -116,8 +119,8 @@ function PredioQuotas({appData}) {
     return [...g.entries()].sort((a,b)=> a[0]===null ? 1 : b[0]===null ? -1 : b[0]-a[0]).map(([a,xs])=>[a, xs.sort((p,q)=>numCmp(p.f,q.f))]);
   },[infos]);
   const x = sel && infos.find(i=>i.f.id===sel);
-  const estilo = i => !i.qi ? CEL.exc : i.qi.mesesAtraso===0 ? CEL.ok : i.qi.mesesAtraso===1 ? CEL.um : CEL.mau;
-  const txt = i => !i.qi ? "Sem quota" : i.qi.mesesAtraso===0 ? "Em dia" : i.qi.mesesAtraso===1 ? "1 mês" : `${i.qi.mesesAtraso} meses`;
+  const estilo = i => i.ina ? CEL.ina : !i.qi ? CEL.exc : i.qi.mesesAtraso===0 ? CEL.ok : i.qi.mesesAtraso===1 ? CEL.um : CEL.mau;
+  const txt = i => i.ina ? "Inactivo" : !i.qi ? "Sem quota" : i.qi.mesesAtraso===0 ? "Em dia" : i.qi.mesesAtraso===1 ? "1 mês" : `${i.qi.mesesAtraso} meses`;
 
   return (
     <div className="anim" style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -133,7 +136,7 @@ function PredioQuotas({appData}) {
           {mau>0&&<div style={{flexGrow:mau,background:"var(--brand)"}}/>}
         </div>}
         <div style={{display:"flex",justifyContent:"space-between",fontSize:15,gap:12,flexWrap:"wrap"}}>
-          <span style={{color:"#3D3832"}}>Total em dívida (quotas) · {fmtKz(config.quotaMensal)}/mês</span>
+          <span style={{color:"#3D3832"}}>Total em dívida (quotas) · {fmtKz(quotaAtual(config))}/mês</span>
           <span className="mono" style={{color:totalDivida?"var(--divida)":"var(--ok)"}}>{fmtKz(totalDivida)}</span>
         </div>
       </section>
@@ -164,6 +167,7 @@ function PredioQuotas({appData}) {
           <span><i className="sw" style={{background:"var(--warn-bg)",border:"2px solid var(--warn-line)"}}/>1 mês</span>
           <span><i className="sw" style={{background:"var(--divida-bg)",border:"2px solid var(--brand)"}}/>2 ou mais meses</span>
           <span><i className="sw" style={{background:"var(--grey-bg)"}}/>Não paga quota</span>
+          {infos.some(i=>i.ina)&&<span><i className="sw" style={{background:"#fff",border:"1.5px dashed var(--line-3)"}}/>Inactivo</span>}
         </div>
       </section>
 
@@ -173,7 +177,8 @@ function PredioQuotas({appData}) {
             <span className="serif" style={{fontSize:20,fontWeight:700}}>Apartamento {x.f.numero}</span>
             <button className="btn btn-ghost btn-icon" onClick={()=>setSel(null)} aria-label="Fechar detalhe"><Icon n="x" s={18}/></button>
           </div>
-          {!x.qi ? <div style={{fontSize:15,color:"#3D3832"}}>Não paga quota mensal (acordo com a administração).</div>
+          {x.ina ? <div style={{fontSize:15,color:"#3D3832"}}>Apartamento inactivo: não paga quota.</div>
+          : !x.qi ? <div style={{fontSize:15,color:"#3D3832"}}>Não paga quota mensal (acordo com a administração).</div>
           : x.qi.mesesAtraso===0 ? <div style={{fontSize:15,color:"var(--ok)",fontWeight:700,display:"flex",gap:8,alignItems:"center"}}><Icon n="checkCircle" s={18}/>Quotas em dia</div>
           : <>
               <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -208,7 +213,7 @@ function PublicContribuicoes({appData}) {
       {!abertas.length&&!verFechadas&&<div className="card" style={{textAlign:"center",padding:"28px 0",color:"var(--ink-2)"}}>Sem contribuições em curso.</div>}
       {lista.map(c=>{
         const fechada = contribFechada(c);
-        const apts = fracoes.map(f=>({ f, ...contribInfo(c,f.id,pagamentosContribuicao) })).sort((a,b)=>numCmp(a.f,b.f));
+        const apts = fracoes.map(f=>({ f, ...contribInfo(c,f,pagamentosContribuicao) })).sort((a,b)=>numCmp(a.f,b.f));
         const totalCob = pagamentosContribuicao.filter(p=>p.contribuicaoId===c.id&&p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
         const isLivre = !(parseFloat(c.valorPorFracao)||0) && !(parseFloat(c.valorTotal)||0);
         const meta = metaContrib(c, fracoes);
