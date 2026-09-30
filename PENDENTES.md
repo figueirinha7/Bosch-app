@@ -106,7 +106,7 @@ fica vazio e a página pública continua a receber os nomes.
 - **Partilhar relatório em PDF directamente** (hoje: imprimir → Guardar como PDF → partilhar).
 - **Usar campos da folha que a app ainda ignora:**
   - `multa_atraso_pct` → calcular multa por atraso;
-  - `fracao_ativa` → esconder apartamentos inactivos.
+  - `fracao_ativa` → apartamentos inactivos devem aparecer como "Inactivo" (e não "Em dia") no separador Apartamentos do gestor e na grelha de Quotas da página pública; não devem gerar dívida nem contar em "A cobrar" / cobrança esperada. O Apps Script já envia `ativa`, falta a app usá-lo.
 - **Anexar factura** a uma despesa (foto/PDF no Google Drive).
 - Apagar apartamentos (hoje só se cria e edita).
 
