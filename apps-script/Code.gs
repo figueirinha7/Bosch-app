@@ -15,6 +15,17 @@
 //      pagamento_descritivo (ex.: "Quota apt {apt}"), pagamento_instrucoes,
 //      comprovativo_telefone (WhatsApp para onde os moradores enviam o
 //      comprovativo). São públicas: aparecem na página dos moradores.
+//  • Registo de alterações (G1): cada gravação feita pela app fica na aba
+//    "🗒️ Registo" (data/hora, acção, aba, linha, valores antes, dados).
+//  • Cópias de segurança (G3): pasta "Cópias de segurança" ao lado da
+//    folha. Execute UMA VEZ no editor a função instalarCopiaSemanal()
+//    (autoriza o acesso ao Drive e cria a cópia automática de 2ª feira).
+//    Ficam as últimas 12 cópias. ⚠️ Execute instalarCopiaSemanal ANTES de
+//    publicar a Nova versão: a v7 precisa de autorizações novas (Drive).
+//  • Fecho de período (G4): chave fechado_ate (aaaa-mm) na aba
+//    Configurações, gerida pela app. Movimentos com data até esse mês
+//    (quotas, contribuições, despesas) já não podem ser criados,
+//    alterados nem apagados.
 //
 //  NOVO — CONTRIBUIÇÕES FECHADAS
 //  • Uma contribuição com estado "Fechado" deixa de aceitar pagamentos
@@ -553,6 +564,7 @@ function lerDados() {
       mesBase:        parseInt(config["mes_inicio"] || "1")    || 1,
       multaAtraso:    num(config["multa_atraso_pct"]),
       quotaHistorico: readQuotaHistorico(),
+      fechadoAte:     fechoAte(),
       pagamento: {
         iban:       config["pagamento_iban"]       || "",
         titular:    config["pagamento_titular"]    || "",
@@ -666,12 +678,19 @@ function verificarLinha(chave, rowNum, sig) {
   if (!sig || rowSig(valores) !== sig) {
     throw new Error("Este registo foi alterado entretanto na folha. Actualize (↻) e tente de novo.");
   }
-  return { sheet, row, esq };
+  // Valores actuais da linha, por campo (para o registo e para o fecho de período)
+  const cols  = resolverColunas(esq, sheet, false);
+  const antes = {};
+  Object.keys(cols).forEach(k => { if (cols[k] <= valores.length) antes[k] = normCell(valores[cols[k] - 1]); });
+  LOG.antes = antes; LOG.aba = esq.aba; LOG.linha = row;
+  return { sheet, row, esq, antes };
 }
 
 // Actualiza apenas os campos enviados, célula a célula (preserva fórmulas).
-function editar(chave, data, permitidos) {
-  const { sheet, row, esq } = verificarLinha(chave, data._row, data._sig);
+// validar(antes): verificação extra antes de gravar (ex.: período fechado).
+function editar(chave, data, permitidos, validar) {
+  const { sheet, row, esq, antes } = verificarLinha(chave, data._row, data._sig);
+  if (validar) validar(antes);
   const cols = resolverColunas(esq, sheet, true);
   permitidos.forEach(k => {
     if (data[k] === undefined || !cols[k]) return;
@@ -680,8 +699,9 @@ function editar(chave, data, permitidos) {
   return row;
 }
 
-function apagar(chave, data) {
-  const { sheet, row } = verificarLinha(chave, data._row, data._sig);
+function apagar(chave, data, validar) {
+  const { sheet, row, antes } = verificarLinha(chave, data._row, data._sig);
+  if (validar) validar(antes);
   sheet.deleteRow(row);
   return row;
 }
@@ -705,6 +725,139 @@ function contribAberta(id) {
 function numeroExiste(numero, excetoRow) {
   return readFracoes().some(f => String(f.numero).trim().toLowerCase() === String(numero).trim().toLowerCase()
                               && f._row !== parseInt(excetoRow));
+}
+
+
+// ════════════════════════════════════════════════════════════════
+//  FECHO DE PERÍODO (G4)
+// ════════════════════════════════════════════════════════════════
+// Devolve "aaaa-mm" do último mês fechado, ou "".
+function fechoAte() {
+  const sheet = SS.getSheetByName(ABA.CONFIG);
+  if (!sheet || sheet.getLastRow() < 5) return "";
+  const data = sheet.getRange(5, 2, sheet.getLastRow() - 4, 2).getValues();
+  for (let i = 0; i < data.length; i++) {
+    if (String(data[i][0]).trim() !== "fechado_ate") continue;
+    const v = data[i][1];
+    if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), "yyyy-MM");
+    const m = String(v || "").trim().match(/^(\d{4})-(\d{1,2})/);
+    return m ? m[1] + "-" + ("0" + m[2]).slice(-2) : "";
+  }
+  return "";
+}
+
+function escreverConfig(chave, valor) {
+  const sheet = getSheet(ABA.CONFIG);
+  const last  = Math.max(sheet.getLastRow(), 4);
+  if (last >= 5) {
+    const ks = sheet.getRange(5, 2, last - 4, 1).getValues();
+    for (let i = 0; i < ks.length; i++) {
+      if (String(ks[i][0]).trim() === chave) { sheet.getRange(5 + i, 3).setValue(valor); return 5 + i; }
+    }
+  }
+  sheet.getRange(last + 1, 2, 1, 2).setValues([[chave, valor]]);
+  return last + 1;
+}
+
+// Mês de caixa de um registo (data do movimento; nas quotas sem data, o mês de referência)
+function mesDoRegisto(o) {
+  const d = String((o && o.data) || "");
+  if (/^\d{4}-\d{2}/.test(d)) return d.slice(0, 7);
+  if (o && parseInt(o.ano) > 2000 && parseInt(o.mes) >= 1) return o.ano + "-" + ("0" + parseInt(o.mes)).slice(-2);
+  return "";
+}
+
+function exigirPeriodoAberto(k) {
+  const f = fechoAte();
+  if (!f || !k || k > f) return;
+  const [a, m] = f.split("-");
+  throw new Error("As contas estão fechadas até " + m + "/" + a + ". Este movimento é de " + k.slice(5, 7) + "/" + k.slice(0, 4) +
+    " e já não pode ser alterado. Se for mesmo preciso, reabra o período em Gestão.");
+}
+// Para editar: a data antiga e a nova têm de estar em período aberto
+function validarAberto(data) {
+  return antes => { exigirPeriodoAberto(mesDoRegisto(antes)); if (data) exigirPeriodoAberto(mesDoRegisto(Object.assign({}, antes, data))); };
+}
+
+
+// ════════════════════════════════════════════════════════════════
+//  REGISTO DE ALTERAÇÕES (G1)
+// ════════════════════════════════════════════════════════════════
+const LOG = { antes: null, aba: "", linha: "" };
+const ABA_REGISTO = "🗒️ Registo";
+const SEM_REGISTO = ["get_registo", "list_copias"];
+
+function registar(action, data, res) {
+  try {
+    let sheet = SS.getSheetByName(ABA_REGISTO);
+    if (!sheet) {
+      sheet = SS.insertSheet(ABA_REGISTO);
+      sheet.getRange(1, 1).setValue("Registo de alterações feitas pela app (não editar)").setFontWeight("bold");
+      sheet.getRange(4, 1, 1, 6).setValues([["data_hora", "accao", "aba", "linha", "antes", "dados"]]).setFontWeight("bold");
+    }
+    const limpo = {};
+    Object.keys(data || {}).forEach(k => { if (k !== "_sig" && k !== "password") limpo[k] = data[k]; });
+    const corta = s => s.length > 40000 ? s.slice(0, 40000) + "…" : s;
+    sheet.appendRow([
+      Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"),
+      action, LOG.aba || "", LOG.linha || (res && res.row) || "",
+      LOG.antes ? corta(JSON.stringify(LOG.antes)) : "",
+      corta(JSON.stringify(limpo)),
+    ]);
+  } catch (_) { /* o registo nunca impede a gravação */ }
+}
+
+function lerRegisto(n) {
+  const sheet = SS.getSheetByName(ABA_REGISTO);
+  if (!sheet || sheet.getLastRow() < 5) return [];
+  const total = sheet.getLastRow() - 4, qtd = Math.min(n || 100, total);
+  const vals = sheet.getRange(sheet.getLastRow() - qtd + 1, 1, qtd, 6).getValues();
+  return vals.reverse().map(v => ({
+    dataHora: v[0] instanceof Date ? Utilities.formatDate(v[0], Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss") : String(v[0]),
+    accao: String(v[1]), aba: String(v[2]), linha: String(v[3]), antes: String(v[4]), dados: String(v[5]),
+  }));
+}
+
+
+// ════════════════════════════════════════════════════════════════
+//  CÓPIAS DE SEGURANÇA (G3)
+// ════════════════════════════════════════════════════════════════
+const PASTA_COPIAS  = "Cópias de segurança";
+const MANTER_COPIAS = 12;
+
+function pastaCopias() {
+  const pais = DriveApp.getFileById(SS.getId()).getParents();
+  const pai  = pais.hasNext() ? pais.next() : DriveApp.getRootFolder();
+  const it   = pai.getFoldersByName(PASTA_COPIAS);
+  return it.hasNext() ? it.next() : pai.createFolder(PASTA_COPIAS);
+}
+
+function listarCopias() {
+  const it = pastaCopias().getFiles();
+  const r = [];
+  while (it.hasNext()) { const f = it.next(); r.push({ nome: f.getName(), data: f.getDateCreated().toISOString(), url: f.getUrl(), id: f.getId() }); }
+  return r.sort((a, b) => b.data.localeCompare(a.data));
+}
+
+// Também é chamada pelo accionador semanal (instalarCopiaSemanal)
+function copiaSeguranca() {
+  const pasta = pastaCopias();
+  const nome  = SS.getName() + " — cópia " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH'h'mm");
+  const f = DriveApp.getFileById(SS.getId()).makeCopy(nome, pasta);
+  listarCopias().slice(MANTER_COPIAS).forEach(c => { try { DriveApp.getFileById(c.id).setTrashed(true); } catch (_) {} });
+  PROPS.setProperty("ULTIMA_COPIA", new Date().toISOString());
+  return { nome, url: f.getUrl() };
+}
+
+function copiaAutomaticaActiva() {
+  return ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === "copiaSeguranca");
+}
+
+// Executar UMA VEZ no editor: autoriza o Drive e cria a cópia semanal (2ª feira, ~03h)
+function instalarCopiaSemanal() {
+  ScriptApp.getProjectTriggers().forEach(t => { if (t.getHandlerFunction() === "copiaSeguranca") ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger("copiaSeguranca").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(3).create();
+  Logger.log("✅ Cópia semanal activa. Primeira cópia: " + copiaSeguranca().nome);
 }
 
 
@@ -757,7 +910,15 @@ function doPost(e) {
 }
 
 
+// Executa a acção e guarda-a no registo de alterações (G1)
 function executar(action, data) {
+  LOG.antes = null; LOG.aba = ""; LOG.linha = "";
+  const res = executarAccao(action, data);
+  if (res && res.ok && SEM_REGISTO.indexOf(action) < 0) registar(action, data, res);
+  return res;
+}
+
+function executarAccao(action, data) {
   switch (action) {
 
     // ── APARTAMENTOS ────────────────────────────────────────────
@@ -797,6 +958,7 @@ function executar(action, data) {
       exigir(data.fracao_numero, "Seleccione o apartamento");
       exigir(meses.length > 0, "Indique pelo menos um mês");
       meses.forEach(m => exigir(m.mes >= 1 && m.mes <= 12 && m.ano > 2000, "Mês de referência inválido"));
+      exigirPeriodoAberto(String(data.data || hoje()).slice(0, 7));
       const row = acrescentar("QUOTAS", meses.map(m => ({
         fracao_numero: data.fracao_numero, data: data.data || hoje(), valor: m.valor,
         mes: m.mes, ano: m.ano, metodo: data.metodo || "",
@@ -807,7 +969,7 @@ function executar(action, data) {
 
     // Compatibilidade com a v4 (um só mês)
     case "add_pagamento_quota":
-      return executar("add_pagamentos_quota", {
+      return executarAccao("add_pagamentos_quota", {
         fracao_numero: data.fracao_numero, data: data.data, metodo: data.metodo,
         referencia: data.referencia, observacoes: data.observacoes,
         meses: [{ mes: parseInt(data.mes), ano: parseInt(data.ano), valor: data.valor }],
@@ -815,12 +977,12 @@ function executar(action, data) {
 
     case "edit_pagamento_quota": {
       if (data.mes !== undefined) exigir(data.mes >= 1 && data.mes <= 12, "Mês inválido");
-      const row = editar("QUOTAS", data, ["fracao_numero", "data", "valor", "mes", "ano", "metodo", "referencia", "observacoes"]);
+      const row = editar("QUOTAS", data, ["fracao_numero", "data", "valor", "mes", "ano", "metodo", "referencia", "observacoes"], validarAberto(data));
       return { ok: true, row };
     }
 
     case "delete_pagamento_quota":
-      return { ok: true, row: apagar("QUOTAS", data) };
+      return { ok: true, row: apagar("QUOTAS", data, validarAberto()) };
 
     case "add_isencoes_quota": {
       const meses = data.meses || [];
@@ -841,6 +1003,7 @@ function executar(action, data) {
       valores.forEach(v => {
         exigir(parseInt(v.mes) >= 1 && parseInt(v.mes) <= 12 && parseInt(v.ano) > 2000, "Mês inválido");
         exigir(Number(v.valor) > 0, "O valor tem de ser maior que zero");
+        exigirPeriodoAberto(parseInt(v.ano) + "-" + ("0" + parseInt(v.mes)).slice(-2));
         exigir(!existentes.some(h => h.ano === parseInt(v.ano) && h.mes === parseInt(v.mes)),
           "Já existe um valor para " + v.mes + "/" + v.ano);
       });
@@ -849,7 +1012,7 @@ function executar(action, data) {
     }
 
     case "delete_valor_quota":
-      return { ok: true, row: apagar("QVAL", data) };
+      return { ok: true, row: apagar("QVAL", data, a => exigirPeriodoAberto(mesDoRegisto({ ano: a.ano, mes: a.mes }))) };
 
     // ── CONTRIBUIÇÕES ───────────────────────────────────────────
     case "add_contribuicao": {
@@ -895,6 +1058,7 @@ function executar(action, data) {
       exigir(data.contribuicao_id, "Seleccione a contribuição");
       exigir(data.fracao_numero, "Seleccione o apartamento");
       const c = contribAberta(data.contribuicao_id);
+      exigirPeriodoAberto(String(data.data || hoje()).slice(0, 7));
       const row = acrescentar("PGC", [{
         contribuicao_titulo: c.titulo, contribuicao_id: c.id,
         fracao_numero: data.fracao_numero, data: data.data || hoje(), valor: data.valor || 0,
@@ -908,6 +1072,7 @@ function executar(action, data) {
       const c = contribAberta(data.contribuicao_id);
       const numeros = data.fracao_numeros || [];
       exigir(numeros.length > 0, "Seleccione pelo menos um apartamento");
+      exigirPeriodoAberto(String(data.data || hoje()).slice(0, 7));
       const row = acrescentar("PGC", numeros.map(n => ({
         contribuicao_titulo: c.titulo, contribuicao_id: c.id,
         fracao_numero: n, data: data.data || hoje(), valor: data.valor_por_fracao || 0,
@@ -918,17 +1083,18 @@ function executar(action, data) {
 
     case "edit_pagamento_contribuicao": {
       if (data.contribuicao_id !== undefined) data.contribuicao_titulo = contribPorId(data.contribuicao_id).titulo;
-      const row = editar("PGC", data, ["contribuicao_id", "contribuicao_titulo", "fracao_numero", "data", "valor", "metodo", "referencia", "observacoes"]);
+      const row = editar("PGC", data, ["contribuicao_id", "contribuicao_titulo", "fracao_numero", "data", "valor", "metodo", "referencia", "observacoes"], validarAberto(data));
       return { ok: true, row };
     }
 
     case "delete_pagamento_contribuicao":
-      return { ok: true, row: apagar("PGC", data) };
+      return { ok: true, row: apagar("PGC", data, validarAberto()) };
 
     // ── DESPESAS ────────────────────────────────────────────────
     case "add_despesa": {
       exigir(data.data, "Indique a data");
       exigir(String(data.descricao || "").trim(), "Indique a descrição");
+      exigirPeriodoAberto(String(data.data).slice(0, 7));
       const row = acrescentar("DESPESAS", [{
         data: data.data, valor: data.valor, descricao: data.descricao, categoria: data.categoria || "Outros",
         fornecedor: data.fornecedor || "", numFatura: data.numFatura || "",
@@ -938,10 +1104,10 @@ function executar(action, data) {
     }
 
     case "edit_despesa":
-      return { ok: true, row: editar("DESPESAS", data, ["data", "valor", "descricao", "categoria", "fornecedor", "numFatura", "observacoes"]) };
+      return { ok: true, row: editar("DESPESAS", data, ["data", "valor", "descricao", "categoria", "fornecedor", "numFatura", "observacoes"], validarAberto(data)) };
 
     case "delete_despesa":
-      return { ok: true, row: apagar("DESPESAS", data) };
+      return { ok: true, row: apagar("DESPESAS", data, validarAberto()) };
 
     // ── AVISOS ──────────────────────────────────────────────────
     case "add_aviso": {
@@ -961,6 +1127,24 @@ function executar(action, data) {
     case "delete_aviso":
       return { ok: true, row: apagar("AVISOS", data) };
 
+    // ── GESTÃO: fecho de período, registo, cópias (G1, G3, G4) ──
+    case "set_fecho": {
+      const ate = String(data.ate || "").trim();
+      exigir(!ate || /^\d{4}-\d{2}$/.test(ate), "Mês inválido");
+      LOG.antes = { fechado_ate: fechoAte() }; LOG.aba = ABA.CONFIG;
+      escreverConfig("fechado_ate", ate ? "'" + ate : "");
+      return { ok: true, fechadoAte: ate };
+    }
+
+    case "get_registo":
+      return { ok: true, registo: lerRegisto(parseInt(data.n) || 150) };
+
+    case "list_copias":
+      return { ok: true, copias: listarCopias(), ultima: PROPS.getProperty("ULTIMA_COPIA") || "", automatica: copiaAutomaticaActiva() };
+
+    case "backup_agora":
+      return Object.assign({ ok: true }, copiaSeguranca());
+
     default:
       return { ok: false, error: "Acção desconhecida: " + action };
   }
@@ -972,6 +1156,10 @@ function executar(action, data) {
 // ════════════════════════════════════════════════════════════════
 function testeLeitura() {
   Logger.log(doGet({}).getContent());
+}
+
+function testeCopias() {
+  Logger.log(JSON.stringify({ copias: listarCopias().length, automatica: copiaAutomaticaActiva() }));
 }
 
 function testePassword() {

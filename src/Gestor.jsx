@@ -4,7 +4,7 @@ import { MESES, MESES_S, CATS, AVISO_TIPOS, METODOS, ESTADOS_CONTRIB, today, cha
   fmtKz, fmtNum, fmtSinal, fmtDate, fmtDateCurta, nomeApt, apiPost, waAbrir, msgLembrete, msgAviso,
   quotaInfo, estadoMes, nivelAtraso, contribInfo, contribFechada, ordenarContribs, metaContrib, situacaoApt, intervaloMeses, alocar, resumoMeses,
   fluxoMensal, contaMes, serieMeses, cobrancaMes, rascunhoGet, rascunhoSet, msgRecibo,
-  inativa, semQuota, quotaDoMes, quotaAtual, historicoQuota } from "./lib.js";
+  inativa, semQuota, quotaDoMes, quotaAtual, historicoQuota, mesCaixaQuota, fmtDateTime } from "./lib.js";
 import { Icon, WaSvg, Modal, FG, CheckRow, Warn, Info, ModalBtns, RowActions, MesSelect, AnoSelect, Segmented,
   MesNav, Menu, AptCombo, ConfirmModal, Toast } from "./ui.jsx";
 import { AvisoCard } from "./Publico.jsx";
@@ -12,7 +12,15 @@ import { CentroRelatorios, ReportPreview } from "./Relatorios.jsx";
 import { relatorioExtracto, relatorioRecibo, reciboDePagamento, reciboNovo } from "./relatoriosHtml.js";
 
 const TABS = [["painel","Painel","chart"],["quotas","Quotas","calendar"],["fracoes","Apartamentos","building"],["contribuicoes","Contribuições","list"],
-  ["despesas","Despesas","receipt"],["avisos","Avisos","megaphone"],["relatorios","Relatórios","file"]];
+  ["despesas","Despesas","receipt"],["avisos","Avisos","megaphone"],["relatorios","Relatórios","file"],["gestao","Gestão","settings"]];
+// Nomes legíveis das acções no registo de alterações (G1)
+const ACCOES = { add_fracao:"Novo apartamento", edit_fracao:"Editar apartamento", add_pagamentos_quota:"Pagamento de quota", add_pagamento_quota:"Pagamento de quota",
+  edit_pagamento_quota:"Editar pagamento de quota", delete_pagamento_quota:"Apagar pagamento de quota", add_isencoes_quota:"Isenção de quota",
+  add_valor_quota:"Novo valor da quota", delete_valor_quota:"Apagar valor da quota", add_contribuicao:"Nova contribuição", edit_contribuicao:"Editar contribuição",
+  delete_contribuicao:"Apagar contribuição", add_pagamento_contribuicao:"Pagamento de contribuição", add_pagamento_contribuicao_bulk:"Lançamento para vários",
+  edit_pagamento_contribuicao:"Editar pagamento de contribuição", delete_pagamento_contribuicao:"Apagar pagamento de contribuição",
+  add_despesa:"Nova despesa", edit_despesa:"Editar despesa", delete_despesa:"Apagar despesa", add_aviso:"Novo aviso", edit_aviso:"Editar aviso",
+  delete_aviso:"Apagar aviso", set_fecho:"Fecho de período", backup_agora:"Cópia de segurança" };
 const TITULOS = { fracao:"apartamento", valorQuota:"valor da quota", pagQuota:"pagamento de quota", editQuota:"pagamento de quota", isentarMes:"isenção de quota",
   isentarContrib:"isenção de contribuição", contrib:"contribuição", pagContrib:"pagamento de contribuição", pagContribBulk:"lançamento para vários apartamentos",
   despesa:"despesa", aviso:"aviso" };
@@ -129,6 +137,8 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
   const [abertos,setAbertos]=useState({});
   const [verDivida,setVerDivida]=useState(false);
   const [recibo,setRecibo]=useState(null);
+  const [gst,setGst]=useState({});   // separador Gestão: {copias, ultima, automatica, registo, erro, carregando}
+  const [fecho,setFecho]=useState(()=>{ const d=new Date(anoAtual, mesAtual-2, 1); return {ano:d.getFullYear(), mes:d.getMonth()+1}; });
 
   const { config, fracoes, pagamentosQuota, contribuicoes, pagamentosContribuicao, despesas, avisos=[] } = appData;
   const { anoBase, mesBase } = config;
@@ -142,6 +152,17 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
     const t = setInterval(tick, 20000); tick();
     return ()=>clearInterval(t);
   },[exp]); // eslint-disable-line
+
+  // Separador Gestão: lê as cópias e o registo quando se abre (não mexe nos dados)
+  const lerGestao = async()=>{
+    setGst(g=>({...g,carregando:true,erro:null}));
+    const [c, rg] = await Promise.allSettled([apiPost(apiUrl,"list_copias",{},token), apiPost(apiUrl,"get_registo",{n:150},token)]);
+    if ([c,rg].some(x=>x.status==="rejected"&&x.reason?.code==="AUTH")) return onExpired();
+    setGst({ carregando:false,
+      ...(c.status==="fulfilled"?{copias:c.value.copias,ultima:c.value.ultima,automatica:c.value.automatica}:{erroCopias:c.reason?.message}),
+      ...(rg.status==="fulfilled"?{registo:rg.value.registo}:{erroRegisto:rg.reason?.message}) });
+  };
+  useEffect(()=>{ if (tab==="gestao") lerGestao(); },[tab]); // eslint-disable-line
 
   const sf = k=>v=>{ setForm(p=>({...p,[k]:v})); setErrs(e=>e[k]?{...e,[k]:undefined}:e); };
   const om = (type,d={})=>{ setModal(type); setForm({data:today(),...d}); setErrs({}); };
@@ -178,6 +199,13 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
     onOk:()=>post(action,{_row:item._row,_sig:item._sig,...extra},{close:false,msgOk:"Apagado",
       toastAction: desfazer ? {label:"Anular", fn:()=>post(desfazer.action, desfazer.data, {close:false, msgOk:"Registo reposto"})} : undefined}),
   });
+
+  // G4 — período fechado: movimentos com data até config.fechadoAte não se alteram
+  const fechadoAte = config.fechadoAte || "";
+  const noFecho = k => !!(fechadoAte && k && k <= fechadoAte);
+  const bloqQ = p => noFecho(mesCaixaQuota(p));
+  const bloqD = o => noFecho((o.data||"").slice(0,7));
+  const Cadeado = ()=> <span title={`Período fechado até ${fechadoAte.slice(5)}/${fechadoAte.slice(0,4)}`} aria-label="Período fechado" style={{color:"var(--ink-3)",display:"inline-flex",padding:"0 8px"}}><Icon n="lock" s={16}/></span>;
 
   const aptById  = id=>fracoes.find(x=>x.id===id);
   const aptByNum = n=>fracoes.find(x=>String(x.numero)===String(n));
@@ -446,6 +474,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
         {tab==="contribuicoes"&&Contribuicoes()}
         {tab==="despesas"&&Despesas()}
         {tab==="avisos"&&Avisos()}
+        {tab==="gestao"&&Gestao()}
         {tab==="relatorios"&&<>
           <h1 className="section-hd" style={{marginBottom:16}}>Relatórios</h1>
           <CentroRelatorios appData={appData} anos={anos}/>
@@ -453,7 +482,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
       </main>
 
       {/* ── TELEMÓVEL: botão Registar e barra inferior ── */}
-      {tab!=="relatorios"&&<button className="btn btn-red fab" onClick={()=>abrirQuota()}><Icon n="plus" s={20} w={2.6}/>Registar</button>}
+      {tab!=="relatorios"&&tab!=="gestao"&&<button className="btn btn-red fab" onClick={()=>abrirQuota()}><Icon n="plus" s={20} w={2.6}/>Registar</button>}
       <nav aria-label="Secções do gestor" className="bnav">
         {TABS.slice(0,3).map(([k,l,i])=><button key={k} className={tab===k?"on":""} aria-current={tab===k?"page":undefined} onClick={()=>irPara(k)}><Icon n={i} s={22}/>{l}</button>)}
         <Menu label="Mais" icon="menu" chevron={false} up align="right" ariaLabel="Mais secções" btnClass={TABS.slice(3).some(([k])=>k===tab)?"on":""}
@@ -698,7 +727,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
           <td className="hide-sm muted" style={{fontSize:13}}>{p.metodo==="Isento"?<span className="tag tag-grey" title={p.referencia}>Isento</span>:(p.metodo||"—")}</td>
           <td><div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
             {p.metodo!=="Isento"&&<button className="btn btn-ghost btn-icon btn-sm" onClick={()=>setRecibo(reciboDePagamento(appData,p))} aria-label={`Recibo do pagamento do ${f?.numero||""}`} title="Recibo"><Icon n="file" s={16}/></button>}
-            <RowActions desc={`pagamento do ${f?.numero||""}`} onEdit={()=>abrirEditQuota(p)} onDelete={()=>apagarQuota(p)}/></div></td>
+            {bloqQ(p)?<Cadeado/>:<RowActions desc={`pagamento do ${f?.numero||""}`} onEdit={()=>abrirEditQuota(p)} onDelete={()=>apagarQuota(p)}/>}</div></td>
         </tr>; })}</tbody></table>
         {histList.length===0&&<div style={{textAlign:"center",padding:24,color:"var(--ink-2)"}}>Sem registos.</div>}
       </section>}
@@ -729,7 +758,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
                 </span>
                 <span style={{display:"flex",gap:6,alignItems:"center"}}>
                   {p.metodo!=="Isento"&&<button className="btn btn-outline btn-sm" onClick={()=>{ fechar(); setRecibo(reciboDePagamento(appData,p)); }}><Icon n="file" s={15}/>Recibo</button>}
-                  <RowActions desc="registo" onEdit={p.metodo==="Isento"?null:()=>{ fechar(); abrirEditQuota(p); }} onDelete={()=>{ fechar(); apagarQuota(p); }}/>
+                  {bloqQ(p)?<Cadeado/>:<RowActions desc="registo" onEdit={p.metodo==="Isento"?null:()=>{ fechar(); abrirEditQuota(p); }} onDelete={()=>{ fechar(); apagarQuota(p); }}/>}
                 </span>
               </div>
             ))}
@@ -920,8 +949,8 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
                 <td><span className="apt-num">{f?.numero||"?"}</span></td>
                 <td className="hide-sm">{nomeApt(f)}</td>
                 <td className="num">{p.metodo==="Isento"?<span className="tag tag-grey" title={p.referencia}>Isento</span>:fmtNum(p.valor)}</td>
-                <td><RowActions desc={`pagamento do ${f?.numero||""}`} onEdit={p.metodo==="Isento"?null:()=>abrirPagContrib(p)}
-                  onDelete={()=>apagar("delete_pagamento_contribuicao",p,`o ${p.metodo==="Isento"?"registo de isenção":"pagamento"} do apt. ${f?.numero||"?"} em “${c.titulo}”`,undoPagContrib(p))}/></td>
+                <td>{bloqD(p)?<Cadeado/>:<RowActions desc={`pagamento do ${f?.numero||""}`} onEdit={p.metodo==="Isento"?null:()=>abrirPagContrib(p)}
+                  onDelete={()=>apagar("delete_pagamento_contribuicao",p,`o ${p.metodo==="Isento"?"registo de isenção":"pagamento"} do apt. ${f?.numero||"?"} em “${c.titulo}”`,undoPagContrib(p))}/>}</td>
               </tr>;})}</tbody></table></div>}
           </section>;
         })}
@@ -970,7 +999,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
             <td className="num">{fmtNum(d.valor)}</td>
             <td className="muted" style={{fontSize:13}}>{d.fornecedor||"—"}</td>
             <td className="muted" style={{fontSize:13,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={d.observacoes}>{d.observacoes||"—"}</td>
-            <td><RowActions desc={`despesa ${d.descricao}`} onEdit={()=>abrirDespesa(d)} onDelete={()=>apagar("delete_despesa",d,`a despesa “${d.descricao}” (${fmtKz(d.valor)})`,undoDespesa(d))}/></td>
+            <td>{bloqD(d)?<Cadeado/>:<RowActions desc={`despesa ${d.descricao}`} onEdit={()=>abrirDespesa(d)} onDelete={()=>apagar("delete_despesa",d,`a despesa “${d.descricao}” (${fmtKz(d.valor)})`,undoDespesa(d))}/>}</td>
           </tr>
         ))}</tbody></table>
         {despFilt.length===0&&<div style={{textAlign:"center",padding:24,color:"var(--ink-2)"}}>Sem registos.</div>}
@@ -983,10 +1012,10 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
               <span className="muted" style={{fontSize:13}}>{fmtDateCurta(d.data)} · {d.categoria}{d.fornecedor?` · ${d.fornecedor}`:""}</span>
             </span>
             <span className="mono" style={{fontSize:14}}>{fmtNum(d.valor)}</span>
-            <Menu label="" icon="more" ariaLabel={`Acções da despesa ${d.descricao}`} btnClass="btn btn-ghost btn-icon" items={[
+            {bloqD(d)?<Cadeado/>:<Menu label="" icon="more" ariaLabel={`Acções da despesa ${d.descricao}`} btnClass="btn btn-ghost btn-icon" items={[
               {label:"Editar", icon:"edit", onClick:()=>abrirDespesa(d)},
               {label:"Apagar", icon:"trash", danger:true, onClick:()=>apagar("delete_despesa",d,`a despesa “${d.descricao}” (${fmtKz(d.valor)})`,undoDespesa(d))},
-            ]}/>
+            ]}/>}
           </section>
         ))}
         {despFilt.length===0&&<div className="card" style={{textAlign:"center",color:"var(--ink-2)"}}>Sem registos.</div>}
@@ -1013,6 +1042,74 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
         ))}
         {avisos.length===0&&<div className="card" style={{textAlign:"center",padding:36,color:"var(--ink-2)"}}>Nenhum aviso publicado ainda.</div>}
       </div>
+    </>;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     GESTÃO — fecho de período (G4), cópias de segurança (G3), registo (G1)
+  ═══════════════════════════════════════════════════════════════ */
+  function Gestao() {
+    const kF = chaveMes(fecho.ano, fecho.mes);
+    const lblK = k => k ? `${MESES[+k.slice(5,7)-1]} ${k.slice(0,4)}` : "";
+    const fecharAte = ()=>setConfirmar({ title:`Fechar as contas até ${lblK(kF)}?`, okLabel:"Fechar período",
+      body:<>Quotas, contribuições e despesas com data até ao fim de {lblK(kF)} deixam de poder ser registadas, alteradas ou apagadas.<br/><span className="muted" style={{fontSize:14}}>Use depois de aprovar as contas em assembleia. Pode reabrir mais tarde.</span></>,
+      onOk:()=>post("set_fecho",{ate:kF},{close:false,msgOk:`Contas fechadas até ${lblK(kF)}`}) });
+    const reabrir = ()=>setConfirmar({ title:"Reabrir o período?", okLabel:"Reabrir",
+      body:`Todos os movimentos voltam a poder ser alterados. O fecho até ${lblK(fechadoAte)} fica registado no registo de alterações.`,
+      onOk:()=>post("set_fecho",{ate:""},{close:false,msgOk:"Período reaberto"}) });
+    const copiaAgora = async()=>{ setGst(g=>({...g,aCopiar:true}));
+      try { const r=await apiPost(apiUrl,"backup_agora",{},token); showToast({ok:true,msg:`Cópia criada: ${r.nome}`}); lerGestao(); }
+      catch(e){ if(e.code==="AUTH") return onExpired(); showToast({ok:false,msg:e.message}); setGst(g=>({...g,aCopiar:false})); } };
+    const resumo = s => { try { const o=JSON.parse(s||"{}"); return Object.entries(o).filter(([k,v])=>v!==""&&v!==undefined&&k!=="_row").map(([k,v])=>`${k}: ${typeof v==="object"?JSON.stringify(v):v}`).join(" · "); } catch(_) { return s; } };
+    return <>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,gap:10,flexWrap:"wrap"}}>
+        <h1 className="section-hd">Gestão</h1>
+        <button className="btn btn-outline" onClick={lerGestao} disabled={gst.carregando}>{gst.carregando?<span className="spinner"/>:<Icon n="refresh" s={16}/>}Actualizar</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:16}}>
+        <section className="card" style={{display:"flex",flexDirection:"column",gap:12}}>
+          <h2 className="h2" style={{display:"flex",gap:8,alignItems:"center"}}><Icon n="lock" s={18}/>Fecho de período</h2>
+          {fechadoAte
+            ? <div className="banner banner-info"><Icon n="lock" s={18}/><span style={{flex:1}}>Contas fechadas até <b>{lblK(fechadoAte)}</b>. Movimentos até essa data não se alteram.</span></div>
+            : <div className="muted" style={{fontSize:14}}>Nenhum período fechado: todos os movimentos podem ser alterados.</div>}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <FG label="Fechar até (mês)"><MesSelect value={fecho.mes} onChange={m=>setFecho(f=>({...f,mes:m}))}/></FG>
+            <FG label="Ano"><AnoSelect value={fecho.ano} onChange={a=>setFecho(f=>({...f,ano:a}))} anos={anos}/></FG>
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button className="btn btn-dark" onClick={fecharAte} disabled={saving||kF===fechadoAte}><Icon n="lock" s={16}/>Fechar até {lblK(kF)}</button>
+            {fechadoAte&&<button className="btn btn-outline" onClick={reabrir} disabled={saving}>Reabrir</button>}
+          </div>
+        </section>
+        <section className="card" style={{display:"flex",flexDirection:"column",gap:12}}>
+          <h2 className="h2" style={{display:"flex",gap:8,alignItems:"center"}}><Icon n="download" s={18}/>Cópias de segurança</h2>
+          {gst.erroCopias ? <Warn>Não foi possível ler as cópias: {gst.erroCopias}. No Apps Script, execute uma vez a função <b>instalarCopiaSemanal</b> para autorizar o acesso ao Drive.</Warn> : <>
+            <div style={{fontSize:14,display:"flex",flexDirection:"column",gap:4}}>
+              <span>Cópia automática semanal: {gst.automatica===undefined?"…":gst.automatica?<b style={{color:"var(--ok)"}}>activa (2ª feira)</b>:<b style={{color:"var(--divida)"}}>não activa</b>}</span>
+              <span className="muted">Última cópia: {gst.ultima?fmtDateTime(gst.ultima):"—"}</span>
+            </div>
+            {gst.automatica===false&&<Info>Para activar: no Apps Script, escolha a função <b>instalarCopiaSemanal</b> e carregue em Executar (uma vez).</Info>}
+            {(gst.copias||[]).slice(0,5).map(c=><a key={c.id} href={c.url} target="_blank" rel="noreferrer" style={{fontSize:14,color:"var(--info)",display:"flex",gap:6,alignItems:"center"}}><Icon n="file" s={15}/>{c.nome}</a>)}
+            {gst.copias&&gst.copias.length>5&&<span className="muted" style={{fontSize:13}}>e mais {gst.copias.length-5} na pasta “Cópias de segurança”.</span>}
+          </>}
+          <button className="btn btn-outline" style={{alignSelf:"flex-start"}} onClick={copiaAgora} disabled={gst.aCopiar}>{gst.aCopiar?<span className="spinner"/>:<Icon n="plus" s={16}/>}Fazer cópia agora</button>
+        </section>
+      </div>
+      <section className="card" style={{overflowX:"auto"}}>
+        <h2 className="h2" style={{marginBottom:4}}>Registo de alterações</h2>
+        <div className="muted" style={{fontSize:13,marginBottom:10}}>Últimas gravações feitas pela app (aba “🗒️ Registo” da folha). Em alterações e apagamentos fica também o que estava antes.</div>
+        {gst.erroRegisto&&<Warn>{gst.erroRegisto}</Warn>}
+        {gst.registo&&gst.registo.length===0&&<div className="muted" style={{fontSize:14}}>Ainda sem registos. As próximas gravações aparecem aqui.</div>}
+        {gst.registo&&gst.registo.length>0&&<table><thead><tr><th>Data e hora</th><th>Acção</th><th>Detalhe</th></tr></thead>
+          <tbody>{gst.registo.map((x,i)=><tr key={i}>
+            <td className="muted" style={{fontSize:13,whiteSpace:"nowrap"}}>{x.dataHora}</td>
+            <td style={{fontSize:14,fontWeight:700,whiteSpace:"nowrap",color:/^delete/.test(x.accao)?"var(--divida)":undefined}}>{ACCOES[x.accao]||x.accao}</td>
+            <td style={{fontSize:12,maxWidth:560}}>
+              <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={resumo(x.dados)}>{resumo(x.dados)}</div>
+              {x.antes&&<div className="muted" style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={resumo(x.antes)}>antes: {resumo(x.antes)}</div>}
+            </td>
+          </tr>)}</tbody></table>}
+      </section>
     </>;
   }
 
