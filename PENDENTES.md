@@ -3,7 +3,7 @@
 Lista de trabalho da app (Vercel: bosch-app-4xip.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
-## 🧪 v7-beta (branch `beta`) — A1, A2, B1, C1, C2, D1, G1, G3, G4
+## 🧪 v7 (branch `beta`, ainda não no `main`) — A1, A2, B1, C1, C2, D1, G1, G3, G4
 
 **Para testar na folha beta (por esta ordem):**
 1. Colar o novo `Code.gs` no Apps Script da folha **beta** e guardar.
@@ -12,7 +12,7 @@ Lista de trabalho da app (Vercel: bosch-app-4xip.vercel.app) e do Apps Script
 4. Opcional (C2), na aba ⚙️ Configurações acrescentar as chaves: `pagamento_iban`, `pagamento_titular`, `pagamento_banco`, `pagamento_descritivo` (ex.: `Quota apt {apt}`), `pagamento_instrucoes`, `comprovativo_telefone`. São públicas.
 5. Testar no Preview do `beta` (ligado à folha beta com `?setup`).
 
-Ao passar para o `main`: mudar `APP_VERSAO` (`src/lib.js`) e `VERSAO` (`Code.gs`) para `v7` e repetir os passos 1–4 na folha real.
+Ao passar para o `main`: repetir os passos 1–4 na folha **real** (antes do merge), fazer o Pull Request `beta → main` e criar a release `v7`. Depois do merge, trocar 🧪 por ✅ nesta secção.
 
 - **A1** "Em dívida (total)" com "De onde vem": quotas + contribuições **abertas**, por contribuição e por apartamento, e o que não conta (fechadas, inactivos, isentos, meses por vencer).
 - **A2** Apartamentos inactivos (`fracao_ativa` = Não): "Inactivo" no gestor e na página pública; sem dívida, fora da cobrança e das contribuições. Editável no formulário do apartamento ("Apartamento activo").
@@ -121,7 +121,7 @@ fica vazio e a página pública continua a receber os nomes.
 
 Cada item tem um código (ex.: **B2**) para pedir alterações directamente.
 Prioridade sugerida: 1) A1, A2, B1 · 2) C1, C2, D1 · 3) G1, G3, G4 · 4) E, F.
-🧪 = feito na v7-beta, à espera de teste e de passar para o `main`.
+🧪 = feito na v7, à espera de teste e de passar para o `main`.
 
 ### A. Números e estados (fiabilidade)
 

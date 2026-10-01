@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-//  CONDOMÍNIO — Google Apps Script API  v7-beta
+//  CONDOMÍNIO — Google Apps Script API  v7
 //  Cole este código em: script.google.com → projecto ligado ao Sheets
 //  Depois: Implementar → Gerir implementações → editar → Nova versão
 //          (Executar como: Eu · Acesso: Qualquer pessoa)
@@ -59,7 +59,7 @@
 //  • Editar e apagar lançamentos (quotas, contribuições, despesas, avisos).
 // ═══════════════════════════════════════════════════════════════
 
-const VERSAO         = "v7-beta";
+const VERSAO         = "v7";
 const SS             = SpreadsheetApp.getActiveSpreadsheet();
 const PROPS          = PropertiesService.getScriptProperties();
 const SESSAO_HORAS   = 8;   // duração de uma sessão de gestor
