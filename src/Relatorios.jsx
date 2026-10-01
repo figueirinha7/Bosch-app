@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from "react";
-import { MESES, nomeApt, situacaoApt, fmtKz } from "./lib.js";
+import { MESES, nomeApt, situacaoApt, fmtKz, inativa } from "./lib.js";
 import { relatorioMensal, relatorioAnual, relatorioExtracto, relatorioAtrasos, descarregarHtml } from "./relatoriosHtml.js";
 import { Icon, FG, CheckRow, MesSelect, AnoSelect, AptCombo } from "./ui.jsx";
 
@@ -80,7 +80,7 @@ export function CentroRelatorios({appData, anos}) {
         </div>}
         {tipo==="extracto"&&<FG label="Apartamento">
           <AptCombo fracoes={appData.fracoes} value={apt} onChange={setApt}
-            info={x=>{ const s=situacaoApt(x,appData); return s.total>0?{txt:fmtKz(s.total),tone:"bad"}:{txt:"Em dia",tone:"ok"}; }}/>
+            info={x=>{ if (inativa(x)) return {txt:"Inactivo"}; const s=situacaoApt(x,appData); return s.total>0?{txt:fmtKz(s.total),tone:"bad"}:x.excluiQuota?{txt:"Sem quota"}:{txt:"Em dia",tone:"ok"}; }}/>
         </FG>}
         {tipo!=="extracto"&&<div>
           <div className="lbl" style={{marginBottom:4}}>Incluir</div>

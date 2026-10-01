@@ -289,6 +289,7 @@ export function relatorioExtracto(appData, fracaoId) {
   <div style="background:#fff"><span>Quota mensal</span><b>${inativa(f)?"Inactivo":f.excluiQuota?"Não paga":kz(quotaAtual(config))+" Kz"}</b></div>
 </div>
 
+${inativa(f)?`<p class="nota" style="margin-top:10px">Apartamento inactivo: não paga quotas nem contribuições.</p>`:""}
 <h2>Pagamentos registados</h2>
 ${mov.length?`<table><thead><tr><th>Data</th><th>Referente a</th><th>Método</th><th class="n">Valor (Kz)</th></tr></thead><tbody>
 ${mov.map(m=>`<tr><td>${esc(fmtDateNum(m.data))||"—"}</td><td>${esc(m.desc)}</td><td class="mut">${esc(m.metodo||"—")}</td><td class="n">${m.valor===null?"isento":kz(m.valor)}</td></tr>`).join("")}
@@ -298,7 +299,7 @@ ${mov.map(m=>`<tr><td>${esc(fmtDateNum(m.data))||"—"}</td><td>${esc(m.desc)}</
 ${total?`<table><thead><tr><th>Referente a</th><th>Vencimento</th><th class="n">Valor (Kz)</th></tr></thead><tbody>
 ${qi.mesesEmFalta.map(m=>`<tr><td>Quota ${MESES[m.mes-1]} ${m.ano}${m.pago?` <span class="mut">(pago ${kz(m.pago)})</span>`:""}</td><td class="mut">${lblMes(m)}</td><td class="n">${kz(m.emFalta)}</td></tr>`).join("")}
 ${contribs.map(c=>`<tr><td>${esc(c.titulo)}</td><td class="mut">${c.dataVencimento?esc(fmtDateNum(c.dataVencimento)):"—"}</td><td class="n">${kz(c.divida)}</td></tr>`).join("")}
-</tbody><tfoot><tr><td colspan="2" class="neg">Total em dívida</td><td class="n neg">${kz(total)}</td></tr></tfoot></table>`:`<p class="ok">Sem valores em falta. O apartamento tem as quotas e contribuições em dia.</p>`}
+</tbody><tfoot><tr><td colspan="2" class="neg">Total em dívida</td><td class="n neg">${kz(total)}</td></tr></tfoot></table>`:inativa(f)?`<p class="mut">Sem valores em falta (apartamento inactivo).</p>`:`<p class="ok">Sem valores em falta. O apartamento tem as quotas e contribuições em dia.</p>`}
 
 <p class="nota" style="margin-top:18px">Documento emitido a partir dos registos do condomínio. Se encontrar algum erro, contacte o gestor${config.gestorNome?` (${esc(config.gestorNome)}${config.gestorTelefone?`, ${esc(config.gestorTelefone)}`:""})`:""}.</p>`;
   return pagina(`Extracto de conta — Apartamento ${f.numero}`, "", corpo, config);

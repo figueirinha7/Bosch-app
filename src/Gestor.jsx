@@ -1322,8 +1322,8 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
           <legend className="lbl" style={{marginBottom:6}}>Apartamentos que não participam</legend>
           <div style={{maxHeight:180,overflowY:"auto",border:"1.5px solid var(--line-3)",borderRadius:10,padding:"4px 10px"}}>
             {fracoesOrd.map(f=>(
-              <CheckRow key={f.id} label={`${f.numero} — ${nomeApt(f)}`} checked={(form.excluidos||[]).includes(f.numero)}
-                onChange={v=>sf("excluidos")(v?[...(form.excluidos||[]),f.numero]:(form.excluidos||[]).filter(n=>n!==f.numero))}/>
+              <CheckRow key={f.id} label={`${f.numero} — ${nomeApt(f)}${inativa(f)?" (inactivo, não participa)":""}`} checked={inativa(f)||(form.excluidos||[]).includes(f.numero)}
+                onChange={v=>{ if(inativa(f)) return; sf("excluidos")(v?[...(form.excluidos||[]),f.numero]:(form.excluidos||[]).filter(n=>n!==f.numero)); }}/>
             ))}
           </div>
         </fieldset>
