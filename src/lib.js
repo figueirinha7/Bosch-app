@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════════
    Constantes, formatação, API e cálculos partilhados
 ════════════════════════════════════════════════════════════════ */
-export const APP_VERSAO = "v6";
+export const APP_VERSAO = "v7";
 export const API_URL    = "https://script.google.com/macros/s/AKfycbyvN52wjCWtvSOMrRqszVtOZC1OfSnfciOSN1iANp-vH-Ap6wIgchYlUuIu9SUyQgUsVw/exec";
 
 export const MESES   = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -94,6 +94,14 @@ export function msgLembrete(f, nome, qi, contribs, config) {
   linhas.push("", `*Total em dívida: ${fmtKz(total)}*`, "", "Agradecemos a regularização com a maior brevidade possível.", "", `${config.gestorNome||"A gestão"}`);
   return linhas.join("\n");
 }
+// Recibo por WhatsApp (D1) — rec vem de reciboNovo / reciboDePagamento
+export function msgRecibo(rec, nome, config) {
+  return [`🏢 *${config.predio}*`, "", `*Recibo de pagamento n.º ${rec.numero}*`, "",
+    `Caro(a) ${nome||nomeApt(rec.f)},`, "",
+    `Confirmamos a recepção de *${fmtKz(rec.total)}* do apartamento *${rec.f?.numero}*, pago a ${fmtDate(rec.data)}${rec.metodo?` (${rec.metodo})`:""}, referente a:`,
+    ...rec.meses.map(m=>`• Quota ${MESES[m.mes-1]} ${m.ano}: ${fmtKz(m.valor)}`),
+    "", "Obrigado.", "", `${config.gestorNome||"A gestão"}`].join("\n");
+}
 export function msgAviso(a, config) {
   const url = window.location.origin + window.location.pathname;
   return [`📢 *${config.predio}*`, "", `*${a.tipo}: ${a.titulo}*`, a.data ? fmtDate(a.data) : "", "", a.conteudo||"", "", `Mais informação: ${url}`]
@@ -103,9 +111,38 @@ export function msgAviso(a, config) {
 /* ═══════════════════════════════════════════════════════════════
    QUOTAS E CONTRIBUIÇÕES
 ═══════════════════════════════════════════════════════════════ */
-export function quotaInfo(fracaoId, pags, quotaMensal, anoBase, mesBase) {
+/* ── APARTAMENTOS INACTIVOS (A2) ──
+   fracao_ativa = "Não" na folha: não paga quotas nem contribuições e aparece como "Inactivo". */
+export const inativa = (f) => f?.ativa === false;
+// Apartamento que não paga quota mensal (acordo especial ou inactivo)
+export const semQuota = (f) => !!f?.excluiQuota || inativa(f);
+
+/* ── VALOR DA QUOTA AO LONGO DO TEMPO (B1) ──
+   config.quotaHistorico = [{ano, mes, valor}, ...] vindo da aba "💲 Valor da Quota".
+   Cada valor vale a partir desse mês. Sem histórico usa quota_mensal_kz para todos os meses;
+   antes do primeiro valor do histórico usa o primeiro valor. */
+export function historicoQuota(config) {
+  return [...(config?.quotaHistorico||[])].filter(h=>h.ano>2000&&h.mes>=1&&h.mes<=12)
+    .sort((a,b)=>a.ano-b.ano||a.mes-b.mes);
+}
+export function quotaDoMes(config, ano, mes) {
+  const h = historicoQuota(config);
+  if (!h.length) return config?.quotaMensal||0;
+  const k = chaveMes(ano, mes);
+  let v = h[0].valor;
+  h.forEach(x=>{ if (chaveMes(x.ano,x.mes) <= k) v = x.valor; });
+  return v;
+}
+export function quotaAtual(config) {
+  const d = new Date();
+  return quotaDoMes(config, d.getFullYear(), d.getMonth()+1);
+}
+
+// ate = {ano, mes}: calcula a situação no fim desse mês (por omissão, hoje)
+export function quotaInfo(fracaoId, pags, config, ate) {
+  const { anoBase, mesBase } = config;
   const now = new Date();
-  const [ny, nm] = [now.getFullYear(), now.getMonth()+1];
+  const [ny, nm] = ate ? [ate.ano, ate.mes] : [now.getFullYear(), now.getMonth()+1];
   const mesesEmFalta = [];
   let y = anoBase, m = mesBase;
   while (y < ny || (y===ny && m<=nm)) {
@@ -114,8 +151,9 @@ export function quotaInfo(fracaoId, pags, quotaMensal, anoBase, mesBase) {
     // Mês isento: existe um registo com metodo="Isento" para este mês
     const isento = pagMes.some(p=>p.metodo==="Isento");
     if (!isento) {
+      const q = quotaDoMes(config, y, m);
       const pagTotal = pagMes.filter(p=>p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
-      if (pagTotal < quotaMensal) mesesEmFalta.push({mes:m, ano:y, pago:pagTotal, emFalta:quotaMensal-pagTotal, key});
+      if (pagTotal < q) mesesEmFalta.push({mes:m, ano:y, pago:pagTotal, emFalta:q-pagTotal, key});
     }
     m++; if(m>12){m=1;y++;}
   }
@@ -124,12 +162,13 @@ export function quotaInfo(fracaoId, pags, quotaMensal, anoBase, mesBase) {
   return { totalPago, divida, mesesAtraso:mesesEmFalta.length, mesesEmFalta };
 }
 
-// Estado de um mês para um apartamento: pago | parcial | falta | isento | futuro | antes | excluido
+// Estado de um mês para um apartamento: pago | parcial | falta | isento | futuro | antes | excluido | inativo
 export function estadoMes(f, ano, mes, pags, config) {
-  if (f.excluiQuota) return { k:"excluido", pago:0, regs:[] };
   const regs = pags.filter(p=>p.fracaoId===f.id && p.mes===mes && p.ano===ano);
+  if (inativa(f)) return { k:"inativo", pago:regs.filter(p=>p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0), regs };
+  if (f.excluiQuota) return { k:"excluido", pago:0, regs:[] };
   const pago = regs.filter(p=>p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
-  const q = config.quotaMensal;
+  const q = quotaDoMes(config, ano, mes);
   if (regs.some(p=>p.metodo==="Isento")) return { k:"isento", pago, regs };
   const antes = ano < config.anoBase || (ano===config.anoBase && mes < config.mesBase);
   const now = new Date(), ny = now.getFullYear(), nm = now.getMonth()+1;
@@ -155,17 +194,20 @@ export const contribFechada = (c) => String(c?.estado||"").trim().toLowerCase() 
 // Abertas primeiro, fechadas no fim (a ordem dentro de cada grupo mantém-se)
 export const ordenarContribs = (cs) => [...cs.filter(c=>!contribFechada(c)), ...cs.filter(contribFechada)];
 
-export function contribInfo(c, fId, pagsCont) {
+// f: apartamento (objecto) ou só o id. Um apartamento inactivo não participa (fica como excluído).
+export function contribInfo(c, f, pagsCont) {
+  const fId = typeof f === "object" && f ? f.id : f;
+  const inativo = typeof f === "object" && inativa(f);
   const pags     = pagsCont.filter(p=>p.contribuicaoId===c.id && p.fracaoId===fId);
   // Isento: existe registo com metodo="Isento" para esta contribuição e fracção
   const isento   = pags.some(p=>p.metodo==="Isento");
   const total    = pags.filter(p=>p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
-  const excluido = (c.excluidos||[]).includes(fId);
+  const excluido = inativo || (c.excluidos||[]).includes(fId);
   const vpf      = parseFloat(c.valorPorFracao) || 0;
   const vt       = parseFloat(c.valorTotal)     || 0;
   const isLivre  = vpf === 0 && vt === 0;
   const fechada  = contribFechada(c);
-  if (isLivre || excluido || isento) return { totalPago:total, divida:0, pago:true, excluido, isLivre, isento, fechada };
+  if (isLivre || excluido || isento) return { totalPago:total, divida:0, pago:true, excluido, inativo, isLivre, isento, fechada };
   const divida = fechada ? 0 : vpf > 0 ? Math.max(0, vpf - total) : 0;
   return { totalPago:total, divida, pago: vpf > 0 ? total >= vpf : total > 0, excluido:false, isLivre:false, isento:false, fechada };
 }
@@ -173,15 +215,22 @@ export function contribInfo(c, fId, pagsCont) {
 // Meta de uma contribuição: valor total, ou valor por apt × apts participantes
 export function metaContrib(c, fracoes) {
   const vt = parseFloat(c.valorTotal)||0, vpf = parseFloat(c.valorPorFracao)||0;
-  return vt > 0 ? vt : vpf * fracoes.filter(f=>!(c.excluidos||[]).includes(f.id)).length;
+  return vt > 0 ? vt : vpf * fracoes.filter(f=>!inativa(f)&&!(c.excluidos||[]).includes(f.id)).length;
 }
 
 // Situação completa de um apartamento (quotas + contribuições)
-export function situacaoApt(f, appData) {
-  const { pagamentosQuota, contribuicoes, pagamentosContribuicao, config } = appData;
-  const qi = f.excluiQuota ? {divida:0,mesesAtraso:0,mesesEmFalta:[],totalPago:0}
-    : quotaInfo(f.id, pagamentosQuota, config.quotaMensal, config.anoBase, config.mesBase);
-  const contribs = contribuicoes.map(c=>({...c,...contribInfo(c,f.id,pagamentosContribuicao)})).filter(c=>c.divida>0);
+// ate = {ano, mes}: situação no fim desse mês — só contam os pagamentos feitos até lá
+export function situacaoApt(f, appData, ate) {
+  const { contribuicoes, config } = appData;
+  let { pagamentosQuota, pagamentosContribuicao } = appData;
+  if (ate) {
+    const k = chaveMes(ate.ano, ate.mes);
+    pagamentosQuota = pagamentosQuota.filter(p=>{ const m=mesCaixaQuota(p); return !m || m<=k; });
+    pagamentosContribuicao = pagamentosContribuicao.filter(p=>!p.data || p.data.slice(0,7)<=k);
+  }
+  const qi = semQuota(f) ? {divida:0,mesesAtraso:0,mesesEmFalta:[],totalPago:0}
+    : quotaInfo(f.id, pagamentosQuota, config, ate);
+  const contribs = contribuicoes.map(c=>({...c,...contribInfo(c,f,pagamentosContribuicao)})).filter(c=>c.divida>0);
   const total = qi.divida + contribs.reduce((s,c)=>s+c.divida,0);
   return { qi, contribs, total };
 }
@@ -272,10 +321,10 @@ export function primeiroMes(fluxo, config) {
 // Cobrança das quotas de um mês (pelo mês de referência)
 export function cobrancaMes(appData, ano, mes) {
   const { fracoes, pagamentosQuota, config } = appData;
-  const q = config.quotaMensal;
+  const q = quotaDoMes(config, ano, mes);
   let pagaram = 0, elegiveis = 0, cobrado = 0, isentos = 0;
   const emFalta = [];
-  fracoes.filter(f=>!f.excluiQuota).forEach(f=>{
+  fracoes.filter(f=>!semQuota(f)).forEach(f=>{
     const e = estadoMes(f, ano, mes, pagamentosQuota, config);
     cobrado += e.pago;
     if (e.k==="isento") { isentos++; return; }
@@ -283,7 +332,7 @@ export function cobrancaMes(appData, ano, mes) {
     elegiveis++;
     if (e.k==="pago") pagaram++; else emFalta.push({ f, ...e });
   });
-  return { pagaram, elegiveis, isentos, cobrado, esperado: elegiveis*q, emFalta, excluidos: fracoes.filter(f=>f.excluiQuota) };
+  return { pagaram, elegiveis, isentos, cobrado, esperado: elegiveis*q, quota: q, emFalta, excluidos: fracoes.filter(f=>f.excluiQuota&&!inativa(f)), inativos: fracoes.filter(inativa) };
 }
 
 // Andar de um apartamento, para a grelha do prédio.

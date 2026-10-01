@@ -1,9 +1,9 @@
 import { useState, useMemo } from "react";
 import { APP_VERSAO, MESES, fmtKz, fmtNum, fmtSinal, fmtDate, fmtDateCurta, fmtDateTime, today, chaveMes,
   quotaInfo, contribInfo, contribFechada, metaContrib, situacaoApt, nivelAtraso, resumoMeses, andarDe, nomeAndar,
-  fluxoMensal, contaMes, primeiroMes, temContas } from "./lib.js";
+  fluxoMensal, contaMes, primeiroMes, temContas, inativa, quotaAtual, stGet, stSet, stDel, waAbrir } from "./lib.js";
 import { relatorioMensal } from "./relatoriosHtml.js";
-import { Icon, Modal, MesNav } from "./ui.jsx";
+import { Icon, Modal, MesNav, WaSvg } from "./ui.jsx";
 import { ReportPreview } from "./Relatorios.jsx";
 
 const TIPO_TAG = { "Notificação":"tag-blue", "Acta de Reunião":"tag-green", "Comunicado":"tag-amber" };
@@ -37,17 +37,67 @@ export function AvisoCard({a, extra}) {
 /* ═══════════════════════════════════════════════════════════════
    VER O MEU APARTAMENTO (pesquisa pelo número)
 ═══════════════════════════════════════════════════════════════ */
-function MeuApartamento({appData}) {
-  const [q,setQ] = useState("");
+// Copiar texto (IBAN, link); devolve true se conseguiu
+async function copiar(txt) {
+  try { await navigator.clipboard.writeText(txt); return true; }
+  catch(_) {
+    try { const t=document.createElement("textarea"); t.value=txt; document.body.appendChild(t); t.select(); const ok=document.execCommand("copy"); t.remove(); return ok; }
+    catch(_) { return false; }
+  }
+}
+const linkApt = (num) => `${window.location.origin}${window.location.pathname}?apt=${encodeURIComponent(num)}`;
+
+/* ═══════════════════════════════════════════════════════════════
+   COMO PAGAR (C2) — dados da aba ⚙️ Configurações (pagamento_*)
+═══════════════════════════════════════════════════════════════ */
+export function ComoPagar({appData, f, valor, compacto}) {
+  const { config } = appData;
+  const pg = config.pagamento || {};
+  const [copiado,setCopiado] = useState("");
+  if (!pg.iban && !pg.instrucoes) return null;
+  const descritivo = (pg.descritivo || "Apt {apt}").replace(/\{apt\}/gi, f?.numero || "(nº do apartamento)");
+  const copia = async (k, txt) => { if (await copiar(txt)) { setCopiado(k); setTimeout(()=>setCopiado(c=>c===k?"":c), 2500); } };
+  const s = f ? situacaoApt(f, appData) : null;
+  const msgComprovativo = () => [`🏢 *${config.predio}*`, "",
+    `Olá, envio o comprovativo de pagamento${f?` do apartamento *${f.numero}*`:""}.`,
+    valor ? `Valor: ${fmtKz(valor)}` : "",
+    s && s.qi.mesesEmFalta.length ? `Referente a: ${resumoMeses(s.qi.mesesEmFalta)}${s.contribs.length?" e "+s.contribs.map(c=>c.titulo).join(", "):""}` : "",
+    "", "(anexe aqui a fotografia ou o PDF do comprovativo)"].filter((l,i,a)=>l!==""||a[i-1]!=="").join("\n");
+  const linha = (k, rot, v, mono) => v ? (
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"6px 0",borderBottom:"1px solid var(--line-2)"}}>
+      <span style={{display:"flex",flexDirection:"column",minWidth:0}}>
+        <span style={{fontSize:12,fontWeight:700,color:"var(--ink-2)"}}>{rot}</span>
+        <span className={mono?"mono":""} style={{fontSize:mono?14:15,fontWeight:mono?400:700,wordBreak:"break-all"}}>{v}</span>
+      </span>
+      <button className="btn btn-outline btn-sm" onClick={()=>copia(k,v)} aria-label={`Copiar ${rot}`} style={{flexShrink:0}}>
+        <Icon n={copiado===k?"check":"copy"} s={15}/>{copiado===k?"Copiado":"Copiar"}</button>
+    </div>) : null;
+  return (
+    <section className={compacto?"":"card anim"} style={{display:"flex",flexDirection:"column",gap:6,...(compacto?{background:"var(--surface-2)",border:"1px solid var(--line)",borderRadius:12,padding:"10px 14px"}:{})}} aria-label="Como pagar">
+      <h2 className={compacto?"":"h2"} style={compacto?{fontWeight:800,fontSize:15}:undefined}>Como pagar</h2>
+      {linha("iban","IBAN",pg.iban,true)}
+      {linha("tit","Titular",pg.titular)}
+      {pg.banco&&<div style={{fontSize:14,padding:"4px 0"}}><span className="muted">Banco:</span> {pg.banco}</div>}
+      {linha("desc","Descritivo a usar na transferência",descritivo)}
+      {pg.instrucoes&&<p style={{fontSize:14,color:"#3D3832",lineHeight:1.5,whiteSpace:"pre-wrap",marginTop:4}}>{pg.instrucoes}</p>}
+      {pg.telefone&&<button className="wa-btn" style={{alignSelf:"flex-start",marginTop:6}} onClick={()=>waAbrir(pg.telefone,msgComprovativo())}><WaSvg s={15}/>Enviar comprovativo ao gestor</button>}
+    </section>
+  );
+}
+
+function MeuApartamento({appData, guardado, onGuardar}) {
+  const [q,setQ] = useState(guardado||"");
+  const [linkOk,setLinkOk] = useState(false);
   const { fracoes } = appData;
   const termo = q.trim().toLowerCase();
   const f = termo ? (fracoes.find(x=>String(x.numero).trim().toLowerCase()===termo)
                   || (()=>{ const c=fracoes.filter(x=>String(x.numero).trim().toLowerCase().startsWith(termo)); return c.length===1?c[0]:null; })()) : null;
   const s = f ? situacaoApt(f, appData) : null;
+  const eMeu = f && guardado && String(f.numero)===String(guardado);
   return (
-    <section className="card anim" style={{marginBottom:16}} aria-label="Ver o meu apartamento">
+    <section className="card anim" style={{marginBottom:16,...(eMeu?{border:"2px solid var(--ink)"}:{})}} aria-label="O meu apartamento">
       <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-        <label htmlFor="meu-apt" style={{fontWeight:800,fontSize:15,display:"flex",gap:8,alignItems:"center"}}><Icon n="search" s={18}/>Ver o meu apartamento</label>
+        <label htmlFor="meu-apt" style={{fontWeight:800,fontSize:15,display:"flex",gap:8,alignItems:"center"}}><Icon n={eMeu?"home":"search"} s={18}/>{guardado?"O meu apartamento":"Ver o meu apartamento"}</label>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
           <input id="meu-apt" className="input" style={{width:170}} placeholder="Nº do apartamento" value={q} onChange={e=>setQ(e.target.value)}/>
           {q&&<button className="btn btn-ghost btn-icon" onClick={()=>setQ("")} aria-label="Limpar"><Icon n="x" s={18}/></button>}
@@ -58,9 +108,11 @@ function MeuApartamento({appData}) {
         <div style={{marginTop:14,display:"flex",flexDirection:"column",gap:12}} aria-live="polite">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
             <span className="serif" style={{fontWeight:700,fontSize:22}}>Apartamento {f.numero}</span>
-            <span className={`tag ${s.total>0?"tag-red":"tag-green"}`}>{s.total>0?`Em dívida: ${fmtKz(s.total)}`:"Tudo em dia"}</span>
+            {inativa(f)?<span className="tag tag-grey">Inactivo</span>
+              :<span className={`tag ${s.total>0?"tag-red":"tag-green"}`}>{s.total>0?`Em dívida: ${fmtKz(s.total)}`:"Tudo em dia"}</span>}
           </div>
-          {f.excluiQuota&&<div style={{fontSize:14,color:"var(--ink-2)"}}>Este apartamento não paga quota mensal (acordo com a administração).</div>}
+          {inativa(f)?<div style={{fontSize:14,color:"var(--ink-2)"}}>Apartamento inactivo: não paga quotas nem contribuições.</div>
+            :f.excluiQuota&&<div style={{fontSize:14,color:"var(--ink-2)"}}>Este apartamento não paga quota mensal (acordo com a administração).</div>}
           {s.qi.mesesEmFalta.length>0&&(
             <div>
               <div style={{fontSize:14,fontWeight:800,marginBottom:6}}>Quotas em falta ({s.qi.mesesAtraso})</div>
@@ -83,6 +135,16 @@ function MeuApartamento({appData}) {
               ))}
             </div>
           )}
+          {s.total>0&&<ComoPagar appData={appData} f={f} valor={s.total} compacto/>}
+          {/* C1 — guardar o apartamento neste telemóvel e partilhar o link pessoal */}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",borderTop:"1px solid var(--line-2)",paddingTop:10}}>
+            {eMeu
+              ? <><span className="tag tag-green"><Icon n="check" s={12}/> Guardado neste telemóvel</span>
+                  <button className="btn btn-ghost btn-sm" onClick={()=>{ onGuardar(null); setQ(""); }}>Esquecer</button></>
+              : <button className="btn btn-outline btn-sm" onClick={()=>onGuardar(f.numero)}><Icon n="home" s={15}/>Este é o meu apartamento</button>}
+            <button className="btn btn-ghost btn-sm" onClick={async()=>{ if(await copiar(linkApt(f.numero))){ setLinkOk(true); setTimeout(()=>setLinkOk(false),2500); } }}>
+              <Icon n={linkOk?"check":"copy"} s={15}/>{linkOk?"Link copiado":"Copiar o meu link"}</button>
+          </div>
         </div>
       )}
     </section>
@@ -97,13 +159,14 @@ const CEL = {
   um:  { background:"var(--warn-bg)", border:"2px solid var(--warn-line)", color:"#7A4109" },
   mau: { background:"var(--divida-bg)", border:"2px solid var(--brand)", color:"var(--divida)" },
   exc: { background:"var(--grey-bg)", border:"1.5px solid var(--grey-bg)", color:"#4A443D" },
+  ina: { background:"#fff", border:"1.5px dashed var(--line-3)", color:"var(--ink-3)" },
 };
 const numCmp = (a,b)=>String(a.numero).localeCompare(String(b.numero),"pt",{numeric:true});
 
 function PredioQuotas({appData}) {
   const { fracoes, pagamentosQuota, config } = appData;
   const [sel,setSel] = useState(null);
-  const infos = useMemo(()=>fracoes.map(f=>({ f, qi: f.excluiQuota ? null : quotaInfo(f.id,pagamentosQuota,config.quotaMensal,config.anoBase,config.mesBase) })),
+  const infos = useMemo(()=>fracoes.map(f=>({ f, ina: inativa(f), qi: f.excluiQuota||inativa(f) ? null : quotaInfo(f.id,pagamentosQuota,config) })),
     [fracoes,pagamentosQuota,config]);
   const pagam = infos.filter(x=>x.qi);
   const emDia = pagam.filter(x=>x.qi.mesesAtraso===0).length;
@@ -116,8 +179,8 @@ function PredioQuotas({appData}) {
     return [...g.entries()].sort((a,b)=> a[0]===null ? 1 : b[0]===null ? -1 : b[0]-a[0]).map(([a,xs])=>[a, xs.sort((p,q)=>numCmp(p.f,q.f))]);
   },[infos]);
   const x = sel && infos.find(i=>i.f.id===sel);
-  const estilo = i => !i.qi ? CEL.exc : i.qi.mesesAtraso===0 ? CEL.ok : i.qi.mesesAtraso===1 ? CEL.um : CEL.mau;
-  const txt = i => !i.qi ? "Sem quota" : i.qi.mesesAtraso===0 ? "Em dia" : i.qi.mesesAtraso===1 ? "1 mês" : `${i.qi.mesesAtraso} meses`;
+  const estilo = i => i.ina ? CEL.ina : !i.qi ? CEL.exc : i.qi.mesesAtraso===0 ? CEL.ok : i.qi.mesesAtraso===1 ? CEL.um : CEL.mau;
+  const txt = i => i.ina ? "Inactivo" : !i.qi ? "Sem quota" : i.qi.mesesAtraso===0 ? "Em dia" : i.qi.mesesAtraso===1 ? "1 mês" : `${i.qi.mesesAtraso} meses`;
 
   return (
     <div className="anim" style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -133,7 +196,7 @@ function PredioQuotas({appData}) {
           {mau>0&&<div style={{flexGrow:mau,background:"var(--brand)"}}/>}
         </div>}
         <div style={{display:"flex",justifyContent:"space-between",fontSize:15,gap:12,flexWrap:"wrap"}}>
-          <span style={{color:"#3D3832"}}>Total em dívida (quotas) · {fmtKz(config.quotaMensal)}/mês</span>
+          <span style={{color:"#3D3832"}}>Total em dívida (quotas) · {fmtKz(quotaAtual(config))}/mês</span>
           <span className="mono" style={{color:totalDivida?"var(--divida)":"var(--ok)"}}>{fmtKz(totalDivida)}</span>
         </div>
       </section>
@@ -164,6 +227,7 @@ function PredioQuotas({appData}) {
           <span><i className="sw" style={{background:"var(--warn-bg)",border:"2px solid var(--warn-line)"}}/>1 mês</span>
           <span><i className="sw" style={{background:"var(--divida-bg)",border:"2px solid var(--brand)"}}/>2 ou mais meses</span>
           <span><i className="sw" style={{background:"var(--grey-bg)"}}/>Não paga quota</span>
+          {infos.some(i=>i.ina)&&<span><i className="sw" style={{background:"#fff",border:"1.5px dashed var(--line-3)"}}/>Inactivo</span>}
         </div>
       </section>
 
@@ -173,7 +237,8 @@ function PredioQuotas({appData}) {
             <span className="serif" style={{fontSize:20,fontWeight:700}}>Apartamento {x.f.numero}</span>
             <button className="btn btn-ghost btn-icon" onClick={()=>setSel(null)} aria-label="Fechar detalhe"><Icon n="x" s={18}/></button>
           </div>
-          {!x.qi ? <div style={{fontSize:15,color:"#3D3832"}}>Não paga quota mensal (acordo com a administração).</div>
+          {x.ina ? <div style={{fontSize:15,color:"#3D3832"}}>Apartamento inactivo: não paga quota.</div>
+          : !x.qi ? <div style={{fontSize:15,color:"#3D3832"}}>Não paga quota mensal (acordo com a administração).</div>
           : x.qi.mesesAtraso===0 ? <div style={{fontSize:15,color:"var(--ok)",fontWeight:700,display:"flex",gap:8,alignItems:"center"}}><Icon n="checkCircle" s={18}/>Quotas em dia</div>
           : <>
               <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
@@ -208,7 +273,7 @@ function PublicContribuicoes({appData}) {
       {!abertas.length&&!verFechadas&&<div className="card" style={{textAlign:"center",padding:"28px 0",color:"var(--ink-2)"}}>Sem contribuições em curso.</div>}
       {lista.map(c=>{
         const fechada = contribFechada(c);
-        const apts = fracoes.map(f=>({ f, ...contribInfo(c,f.id,pagamentosContribuicao) })).sort((a,b)=>numCmp(a.f,b.f));
+        const apts = fracoes.map(f=>({ f, ...contribInfo(c,f,pagamentosContribuicao) })).sort((a,b)=>numCmp(a.f,b.f));
         const totalCob = pagamentosContribuicao.filter(p=>p.contribuicaoId===c.id&&p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
         const isLivre = !(parseFloat(c.valorPorFracao)||0) && !(parseFloat(c.valorTotal)||0);
         const meta = metaContrib(c, fracoes);
@@ -344,8 +409,21 @@ function Contas({appData}) {
 /* ═══════════════════════════════════════════════════════════════
    PÁGINA PÚBLICA
 ═══════════════════════════════════════════════════════════════ */
+// Apartamento guardado no telemóvel (C1): ?apt=3B no link, ou escolhido uma vez na página
+function lerMeuApt() {
+  try {
+    const q = new URLSearchParams(window.location.search).get("apt");
+    if (q) { stSet("condo_meu_apt", q); return q; }
+  } catch(_) {}
+  return stGet("condo_meu_apt") || null;
+}
+
 export function PublicView({appData, offline, onGestor}) {
   const [tab,setTab] = useState("quotas");
+  const [meuApt,setMeuAptSt] = useState(lerMeuApt);
+  const fMeu = meuApt ? appData.fracoes.find(f=>String(f.numero)===String(meuApt)) || null : null;
+  const existe = !!fMeu;
+  const setMeuApt = (n)=>{ if(n) stSet("condo_meu_apt", n); else stDel("condo_meu_apt"); setMeuAptSt(n); };
   const { config, avisos=[] } = appData;
   const avisosSorted = [...avisos].sort((a,b)=>(b.data||"").localeCompare(a.data||""));
   // O contador conta os avisos recentes de todos os tipos — os mesmos que o separador marca como "Novo"
@@ -374,8 +452,10 @@ export function PublicView({appData, offline, onGestor}) {
       </nav>
 
       <main style={{maxWidth:840,margin:"0 auto",padding:"16px 16px 8px"}}>
-        {tab!=="contas"&&tab!=="avisos"&&<MeuApartamento appData={appData}/>}
+        {tab!=="contas"&&tab!=="avisos"&&<MeuApartamento key={existe?meuApt:"-"} appData={appData} guardado={existe?meuApt:null} onGuardar={setMeuApt}/>}
         {tab==="quotas"&&<PredioQuotas appData={appData}/>}
+        {/* "Como pagar" no fim da página, excepto quando já aparece no cartão do meu apartamento (com dívida) */}
+        {tab==="quotas"&&!(fMeu&&situacaoApt(fMeu,appData).total>0)&&<div style={{marginTop:16}}><ComoPagar appData={appData} f={fMeu}/></div>}
         {tab==="contribuicoes"&&<PublicContribuicoes appData={appData}/>}
         {tab==="contas"&&<Contas appData={appData}/>}
         {tab==="avisos"&&<div className="anim" style={{display:"flex",flexDirection:"column",gap:10}}>
