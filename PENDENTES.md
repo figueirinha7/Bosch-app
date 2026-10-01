@@ -3,6 +3,15 @@
 Lista de trabalho da app (Vercel: bosch-app-4xip.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
+## 🧪 v7.1 (branch `beta`, ainda não no `main`) — A3, A4, C3, D3
+
+Só app: o Apps Script continua o da v7 (não é preciso publicar nada no Google).
+
+- **A3** Os cartões do painel abrem o detalhe do mês: *Cobrança* (quem pagou, quem falta, com Registar), *Saldo* (conta do mês e movimentos) e *Despesas* (por categoria e lista).
+- **A4** "Inactivo" também na escolha do apartamento do extracto, no próprio extracto e na lista de quem não participa numa contribuição.
+- **C3** Aviso em destaque no topo da página pública (o mais recente dos últimos 30 dias). Cada morador pode fechá-lo; volta a aparecer quando há um aviso novo.
+- **D3** Botão "Partilhar PDF" em todos os relatórios (mensal, anual, extracto, atrasos, recibo e o relatório público). No telemóvel abre o menu de partilha (WhatsApp, email…); onde isso não existe, descarrega o PDF. As bibliotecas de PDF só são carregadas quando se carrega no botão.
+
 ## ✅ Feito na v7 (no `main` desde 01/10/2026, PR #5) — A1, A2, B1, C1, C2, D1, G1, G3, G4 + relatório por trimestre
 
 **Publicar o Apps Script v7 numa folha (real ou beta), por esta ordem:**
@@ -119,15 +128,15 @@ fica vazio e a página pública continua a receber os nomes.
 ## 🕒 Pendentes para próximas versões
 
 Cada item tem um código (ex.: **B2**) para pedir alterações directamente.
-✅ = já feito (ver a versão no topo). Os códigos mantêm-se para não baralhar referências.
-Próximos sugeridos: 1) A3, A5, G5 (pequenos) · 2) C3, C5, D2, F1 · 3) B3, E1–E4 · 4) G2, F2, F3, D4.
+✅ = já no `main` · 🧪 = feito no `beta`, à espera de teste e merge. Os códigos mantêm-se para não baralhar referências.
+Próximos sugeridos: 1) A5, G5 (pequenos) · 2) C5, D2, F1 · 3) B3, E1–E4 · 4) G2, F2, F3, D4 · Performance da base de dados (ver nota).
 
 ### A. Números e estados (fiabilidade)
 
 - ✅ **A1. Rever o "Em dívida (total)" do painel do gestor** (`src/Gestor.jsx`, `totQ`/`totC`): não se percebe de onde sai o valor (ex.: 1 930 000 Kz = Quotas 650 000 + Contribuições 1 280 000). Deve ser só dívida de quotas + dívida das contribuições **abertas**; confirmar que as fechadas não entram e mostrar o detalhe (tocar no cartão → lista por apartamento/contribuição).
 - ✅ **A2. Apartamentos inactivos** (`fracao_ativa`): devem aparecer como "Inactivo" (e não "Em dia") no separador Apartamentos do gestor e na grelha de Quotas da página pública; não devem gerar dívida nem contar em "A cobrar" / cobrança esperada. O Apps Script já envia `ativa`, falta a app usá-lo.
-- **A3. Detalhe em todos os números do painel**: tocar em cobrança, saldo em caixa, despesas, etc. abre a lista que dá origem ao valor.
-- **A4. Estados coerentes em toda a app** (activo / inactivo / sem quota mensal) no painel, grelhas, relatórios, página pública e lembretes.
+- 🧪 **A3. Detalhe em todos os números do painel**: tocar em cobrança, saldo em caixa, despesas, etc. abre a lista que dá origem ao valor.
+- 🧪 **A4. Estados coerentes em toda a app** (activo / inactivo / sem quota mensal) no painel, grelhas, relatórios, página pública e lembretes.
 - **A5. Multa por atraso** (`multa_atraso_pct`): calcular e mostrar separada da quota.
 
 ### B. Regras de quotas
@@ -140,7 +149,7 @@ Próximos sugeridos: 1) A3, A5, G5 (pequenos) · 2) C3, C5, D2, F1 · 3) B3, E1�
 
 - ✅ **C1. Visão pessoal do morador** (mockups M0/M1 da revisão UI/UX): escolher o apartamento uma vez, ficar guardado no telemóvel (ou link `?apt=3B`) e abrir logo na situação pessoal — "login único e visão única".
 - ✅ **C2. Como pagar**: IBAN, titular, descritivo a usar e botão para enviar o comprovativo ao gestor (precisa de novos campos na aba ⚙️ Configurações).
-- **C3. Aviso em destaque** no topo da página pública (último aviso dos últimos 30 dias).
+- 🧪 **C3. Aviso em destaque** no topo da página pública (último aviso dos últimos 30 dias).
 - **C4. Instalar no telemóvel (PWA)**: `manifest.json` e ícone para "Adicionar ao ecrã principal".
 - **C5. Histórico pessoal**: o morador vê os pagamentos que fez e descarrega os recibos.
 
@@ -148,7 +157,7 @@ Próximos sugeridos: 1) A3, A5, G5 (pequenos) · 2) C3, C5, D2, F1 · 3) B3, E1�
 
 - ✅ **D1. Recibo de pagamento** para imprimir ou enviar por WhatsApp depois de registar uma quota.
 - **D2. Anexar factura a despesas e comprovativo a pagamentos** (foto/PDF no Google Drive).
-- **D3. Partilhar relatório em PDF directamente** (hoje: imprimir → Guardar como PDF → partilhar).
+- 🧪 **D3. Partilhar relatório em PDF directamente** (hoje: imprimir → Guardar como PDF → partilhar).
 - **D4. Arquivo de documentos** na página pública: actas, regulamento, seguros, contratos.
 
 ### E. Finanças do condomínio
@@ -177,4 +186,5 @@ Próximos sugeridos: 1) A3, A5, G5 (pequenos) · 2) C3, C5, D2, F1 · 3) B3, E1�
 ## 📌 Notas
 
 - A palavra-passe do gestor deve estar só em Apps Script → Definições do projecto → Propriedades do script → `GESTOR_PASSWORD`. Depois de a configurar, apagar `gestor_password` da aba ⚙️ Configurações (o script só usa a da folha quando a propriedade não existe). Confirmar antes com a função `testePassword` no editor ("✅ Palavra-passe configurada"). Fazer o mesmo na folha beta.
+- **Performance (avaliado em 01/10/2026, não feito):** o volume do prédio é pequeno para o Google Sheets; a lentidão vem de cada gravação fazer 3 pedidos ao Apps Script (gravar + reler dados do gestor + reler dados públicos). Ordem sugerida: 1) medir em *Apps Script → Execuções*; 2) a gravação devolver os dados actualizados (uma releitura em vez de duas); 3) cache da leitura pública no script; 4) evitar leituras repetidas dentro do script. Mudar de base de dados não compensa.
 - Linhas escritas à mão na folha continuam a funcionar: contribuições novas recebem `id` e pagamentos com o título de uma contribuição são ligados automaticamente na leitura seguinte.

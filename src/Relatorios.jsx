@@ -3,19 +3,94 @@ import { MESES, nomeApt, situacaoApt, fmtKz, inativa } from "./lib.js";
 import { relatorioMensal, relatorioAnual, relatorioExtracto, relatorioAtrasos, descarregarHtml } from "./relatoriosHtml.js";
 import { Icon, FG, CheckRow, MesSelect, AnoSelect, AptCombo } from "./ui.jsx";
 
+/* ── D3: PDF gerado no telemóvel/computador, para partilhar directamente ──
+   Captura a própria pré-visualização (com os estilos do relatório) e corta-a
+   em páginas A4 sem partir linhas de tabela nem caixas a meio.
+   As bibliotecas (html2canvas, jsPDF) só são carregadas quando se carrega no botão. */
+const nomeFicheiro = n => String(n||"relatorio").replace(/[^\w\-. ]+/g,"_").trim() || "relatorio";
+const A4 = { w:210, h:297, mx:14, mt:12, mb:16 };   // mm
+const LARGURA_PX = 688;                              // largura útil (182 mm) em px de ecrã
+async function pdfDoRelatorio(doc, nome) {
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
+  try { await doc.fonts?.ready; } catch(_) {}
+  const st = doc.createElement("style");
+  st.textContent = `body{background:#fff!important}.pg{box-shadow:none!important;margin:0!important;padding:0!important;max-width:none!important;width:${LARGURA_PX}px!important}`;
+  doc.head.appendChild(st);
+  try {
+    const el = doc.querySelector(".pg") || doc.body;
+    const top0 = el.getBoundingClientRect().top;
+    const total = el.scrollHeight;
+    const pxPorMm = LARGURA_PX / (A4.w - 2*A4.mx);
+    const altPag = (A4.h - A4.mt - A4.mb) * pxPorMm;
+    // Pontos onde se pode mudar de página: antes de cada bloco ou linha de tabela
+    const blocos = [...el.querySelectorAll("tr,h2,p,.conta,.dois,.aprov,.cats,.bar,.caixa,.chk,.foot,.hdr,.nota,table,.ass")];
+    const proibidos = [...el.querySelectorAll("h2")].map(h=>{ const r=h.getBoundingClientRect(); return [r.top-top0, r.bottom-top0+48]; });
+    // Também não se corta a seguir a um cabeçalho de tabela, nem dentro de caixas (conta, assinaturas…)
+    el.querySelectorAll("thead").forEach(t=>{ const r=t.getBoundingClientRect(); proibidos.push([r.top-top0+1, r.bottom-top0+2]); });
+    el.querySelectorAll(".aprov,.conta,.dois,.caixa,.cats,.hdr").forEach(t=>{ const r=t.getBoundingClientRect(); proibidos.push([r.top-top0, r.bottom-top0-1]); });
+    const cortes = [...new Set(blocos.map(b=>Math.round(b.getBoundingClientRect().top-top0)))]
+      .filter(y=>y>0 && !proibidos.some(([a,b])=>y>a&&y<=b)).sort((a,b)=>a-b);
+    const paginas = [];
+    let ini = 0;
+    while (ini < total - 2) {
+      let fim = ini + altPag;
+      if (fim >= total) fim = total;
+      else { const c = cortes.filter(y=>y>ini+altPag*0.4 && y<=fim).pop(); if (c) fim = c; }
+      paginas.push([ini, fim]); ini = fim;
+    }
+    const escala = 2;
+    const canvas = await html2canvas(el, { scale: escala, backgroundColor: "#ffffff", windowWidth: 794, useCORS: true });
+    const pdf = new jsPDF({ unit:"mm", format:"a4", orientation:"portrait", compress:true });
+    paginas.forEach(([a,b], i)=>{
+      if (i) pdf.addPage();
+      const c = document.createElement("canvas");
+      c.width = canvas.width; c.height = Math.ceil((b-a)*escala);
+      const ctx = c.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0,0,c.width,c.height);
+      ctx.drawImage(canvas, 0, Math.floor(a*escala), canvas.width, c.height, 0, 0, canvas.width, c.height);
+      pdf.addImage(c.toDataURL("image/jpeg", 0.92), "JPEG", A4.mx, A4.mt, A4.w-2*A4.mx, (b-a)/pxPorMm);
+      pdf.setFontSize(8); pdf.setTextColor(90);
+      pdf.text(`Página ${i+1} de ${paginas.length}`, A4.w-A4.mx, A4.h-8, { align:"right" });
+    });
+    return new File([pdf.output("blob")], nomeFicheiro(nome) + ".pdf", { type: "application/pdf" });
+  } finally { st.remove(); }
+}
+// Partilhar ficheiros só existe em alguns browsers (sobretudo telemóveis); nos outros, descarrega
+const podePartilhar = () => { try { return !!navigator.canShare?.({ files: [new File([""], "x.pdf", { type: "application/pdf" })] }); } catch(_) { return false; } };
+
 /* Pré-visualização: a página fica visível antes de imprimir ou guardar em PDF */
 export function ReportPreview({html, nome, altura="72vh"}) {
   const ref = useRef(null);
+  const [aGerar,setAGerar] = useState(false);
+  const [erro,setErro] = useState("");
+  const partilha = useMemo(podePartilhar, []);
   const imprimir = ()=>{ const w = ref.current?.contentWindow; if (w) { w.focus(); w.print(); } };
+  const pdf = async()=>{
+    const doc = ref.current?.contentDocument; if (!doc) return;
+    setAGerar(true); setErro("");
+    try {
+      const f = await pdfDoRelatorio(doc, nome);
+      if (partilha) {
+        try { await navigator.share({ files:[f], title: nome }); }
+        catch(e) { if (e?.name !== "AbortError") throw e; }
+      } else {
+        const url = URL.createObjectURL(f), a = document.createElement("a");
+        a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(()=>URL.revokeObjectURL(url), 4000);
+      }
+    } catch(e) { setErro("Não foi possível criar o PDF. Use “Imprimir / PDF”."); }
+    setAGerar(false);
+  };
   return (
     <div style={{display:"flex",flexDirection:"column",minHeight:0,border:"1px solid var(--line)",borderRadius:14,overflow:"hidden",background:"#EFEBE5"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",padding:"10px 14px",borderBottom:"1px solid var(--line-3)"}}>
-        <span style={{fontSize:13,color:"var(--ink-2)"}}><b style={{color:"var(--ink)"}}>Pré-visualização</b> · para PDF escolha “Guardar como PDF” ao imprimir</span>
+        <span style={{fontSize:13,color:"var(--ink-2)"}}><b style={{color:"var(--ink)"}}>Pré-visualização</b></span>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <button className="btn btn-outline btn-sm" onClick={()=>descarregarHtml(html, nome)}><Icon n="download" s={16}/>Descarregar</button>
-          <button className="btn btn-red btn-sm" onClick={imprimir}><Icon n="printer" s={16}/>Imprimir / PDF</button>
+          <button className="btn btn-blue btn-sm" onClick={pdf} disabled={aGerar}>{aGerar?<span className="spinner"/>:<Icon n={partilha?"share":"download"} s={16}/>}{partilha?"Partilhar PDF":"Descarregar PDF"}</button>
+          <button className="btn btn-outline btn-sm" onClick={imprimir}><Icon n="printer" s={16}/>Imprimir</button>
+          <button className="btn btn-ghost btn-sm" onClick={()=>descarregarHtml(html, nome)} title="Descarregar como página HTML"><Icon n="file" s={16}/>HTML</button>
         </div>
       </div>
+      {erro&&<div role="alert" className="banner banner-warn" style={{margin:"8px 14px 0"}}><Icon n="alert" s={16}/>{erro}</div>}
       <iframe ref={ref} title={`Pré-visualização: ${nome}`} srcDoc={html} style={{width:"100%",height:altura,border:"none",background:"#E6E1DA"}}/>
     </div>
   );
