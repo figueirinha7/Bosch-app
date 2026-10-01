@@ -136,6 +136,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
   const [fDAno,setFDAno]=useState(""); const [fDCat,setFDCat]=useState(""); const [fDTxt,setFDTxt]=useState("");
   const [abertos,setAbertos]=useState({});
   const [verDivida,setVerDivida]=useState(false);
+  const [kpiDet,setKpiDet]=useState(null);   // A3: "cobranca" | "saldo" | "despesas" (do mês do painel)
   const [recibo,setRecibo]=useState(null);
   const [gst,setGst]=useState({});   // separador Gestão: {copias, ultima, automatica, registo, erro, carregando}
   const [fecho,setFecho]=useState(()=>{ const d=new Date(anoAtual, mesAtual-2, 1); return {ano:d.getFullYear(), mes:d.getMonth()+1}; });
@@ -509,6 +510,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
       </Modal>}
       {cel&&CelModal()}
       {verDivida&&DividaModal()}
+      {kpiDet&&KpiModal()}
       {Formularios()}
     </div>
   );
@@ -546,13 +548,16 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
       </div>
 
       <section className="kpis" style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))",gap:12,marginBottom:16}}>
-        <Kpi label={`Cobrança de quotas · ${MESES[pm.mes-1]}`} sub={<><span className="mono">{fmtNum(cob.cobrado)}</span> de <span className="mono">{fmtKz(cob.esperado)}</span></>}>
+        <Kpi label={`Cobrança de quotas · ${MESES[pm.mes-1]}`} sub={<><span className="mono">{fmtNum(cob.cobrado)}</span> de <span className="mono">{fmtKz(cob.esperado)}</span></>}
+          onClick={()=>setKpiDet("cobranca")} acao="Quem pagou">
           <div style={{display:"flex",alignItems:"baseline",gap:6}}><span className="serif" style={{fontSize:28,fontWeight:700,lineHeight:1}}>{cob.pagaram} / {cob.elegiveis}</span><span className="muted" style={{fontSize:14}}>apts pagaram</span></div>
           <div className="progress-bg" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Cobrança do mês"><div className="progress-fill" style={{width:`${pct}%`,background:"var(--ok-fill)"}}/></div>
         </Kpi>
         <Kpi label={pm.ano===anoAtual&&pm.mes===mesAtual?"Saldo em caixa":`Saldo no fim de ${MESES[pm.mes-1]}`} valor={fmtKz(conta.saldoFinal)}
-          sub={<span style={{fontWeight:700,color:conta.saldoFinal-conta.saldoInicial>=0?"var(--ok)":"var(--divida)"}}>{fmtSinal(conta.saldoFinal-conta.saldoInicial)} Kz no mês</span>}/>
-        <Kpi label="Despesas do mês" valor={fmtKz(conta.despesas)} sub={despMes.length?`${despMes.length} ${despMes.length===1?"lançamento":"lançamentos"}${maior?` · maior: ${maior[0]}`:""}`:"Sem despesas"}/>
+          sub={<span style={{fontWeight:700,color:conta.saldoFinal-conta.saldoInicial>=0?"var(--ok)":"var(--divida)"}}>{fmtSinal(conta.saldoFinal-conta.saldoInicial)} Kz no mês</span>}
+          onClick={()=>setKpiDet("saldo")} acao="Conta do mês"/>
+        <Kpi label="Despesas do mês" valor={fmtKz(conta.despesas)} sub={despMes.length?`${despMes.length} ${despMes.length===1?"lançamento":"lançamentos"}${maior?` · maior: ${maior[0]}`:""}`:"Sem despesas"}
+          onClick={despMes.length?()=>setKpiDet("despesas"):undefined} acao="Ver despesas"/>
         <Kpi label="Em dívida (total)" valor={fmtKz(totQ+totC)} cor={totQ+totC?"var(--divida)":"var(--ok)"} sub={`Quotas ${fmtNum(totQ)} · Contribuições abertas ${fmtNum(totC)}`}
           onClick={()=>setVerDivida(true)} acao="De onde vem"/>
       </section>
@@ -828,6 +833,92 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
         </div>
       </Modal>
     );
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     DETALHE DOS NÚMEROS DO PAINEL (A3) — mês escolhido no painel
+  ═══════════════════════════════════════════════════════════════ */
+  function KpiModal() {
+    const fechar = ()=>setKpiDet(null);
+    const { ano, mes } = pm, k = chaveMes(ano, mes), nomeMes = `${MESES[mes-1]} ${ano}`;
+    const linha = (l, v, o={}) => <div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"6px 0",fontSize:15,fontWeight:o.forte?800:400}}><span>{l}</span><span className="mono" style={{color:o.cor}}>{o.sinal?fmtSinal(v):fmtKz(v)}</span></div>;
+    const caixa = c => <section style={{background:"var(--surface-2)",border:"1px solid var(--line)",borderRadius:12,padding:"8px 16px"}}>{c}</section>;
+    const h3 = t => <h3 style={{fontWeight:800,fontSize:15,margin:"4px 0 6px"}}>{t}</h3>;
+
+    if (kpiDet==="cobranca") {
+      const cob = cobrancaMes(appData, ano, mes);
+      const est = fracoesOrd.filter(f=>!semQuota(f)).map(f=>({f,...estadoMes(f,ano,mes,pagamentosQuota,config)}));
+      const pagos = est.filter(x=>x.k==="pago"), falta = est.filter(x=>x.k==="falta"||x.k==="parcial");
+      const isentos = est.filter(x=>x.k==="isento"), fora = fracoesOrd.filter(semQuota);
+      return <Modal title={`Cobrança de quotas — ${nomeMes}`} onClose={fechar} lg>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {caixa(<>
+            {linha(`Quota do mês (${fmtKz(cob.quota)}) × ${cob.elegiveis} apartamentos`, cob.esperado)}
+            {linha(`Recebido (${pagos.length} pagaram${falta.some(x=>x.k==="parcial")?", com parciais":""})`, cob.cobrado, {cor:"var(--ok)"})}
+            <div className="divider" style={{margin:"4px 0"}}/>
+            {linha("Em falta", Math.max(0, cob.esperado-cob.cobrado), {forte:true, cor:"var(--divida)"})}
+          </>)}
+          <div className="muted" style={{fontSize:13}}>Conta pelo mês a que a quota se refere, seja qual for a data em que foi paga.</div>
+          {falta.length>0&&<div>{h3(`Em falta (${falta.length})`)}
+            {falta.map(x=><div key={x.f.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"6px 0",borderBottom:"1px solid var(--line-2)"}}>
+              <span style={{display:"flex",gap:10,alignItems:"center",minWidth:0}}><span className="apt-num">{x.f.numero}</span><span style={{fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomeApt(x.f)}{x.k==="parcial"&&<span className="muted"> · pagou {fmtNum(x.pago)}</span>}</span></span>
+              <span style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}><span className="mono" style={{color:"var(--divida)"}}>{fmtNum(x.emFalta)}</span>
+                <button className="btn btn-outline btn-sm" onClick={()=>{ fechar(); abrirQuota(x.f.numero,[{mes,ano}]); }}>Registar</button></span>
+            </div>)}</div>}
+          {pagos.length>0&&<div>{h3(`Pagaram (${pagos.length})`)}
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{pagos.map(x=><span key={x.f.id} className="tag tag-green" title={nomeApt(x.f)}>{x.f.numero} · {fmtNum(x.pago)}</span>)}</div></div>}
+          {(isentos.length>0||fora.length>0)&&<div className="muted" style={{fontSize:13}}>
+            {isentos.length>0&&<>Isentos neste mês: {isentos.map(x=>x.f.numero).join(", ")}. </>}
+            {fora.length>0&&<>Não contam: {fora.map(f=>`${f.numero} (${inativa(f)?"inactivo":"sem quota"})`).join(", ")}.</>}
+          </div>}
+        </div>
+      </Modal>;
+    }
+
+    if (kpiDet==="saldo") {
+      const c = contaMes(fluxo, ano, mes);
+      const ent = [
+        ...pagamentosQuota.filter(p=>p.metodo!=="Isento"&&mesCaixaQuota(p)===k).map(p=>({id:p.id,data:p.data,desc:`Quota ${p.mes?MESES_S[p.mes-1]+" "+p.ano:""} · ${aptById(p.fracaoId)?.numero||"?"}`,v:p.valor})),
+        ...pagamentosContribuicao.filter(p=>p.metodo!=="Isento"&&(p.data||"").startsWith(k)).map(p=>({id:p.id,data:p.data,desc:`${contribById(p.contribuicaoId)?.titulo||"Contribuição"} · ${aptById(p.fracaoId)?.numero||"?"}`,v:p.valor})),
+        ...despesas.filter(d=>(d.data||"").startsWith(k)).map(d=>({id:d.id,data:d.data,desc:d.descricao,v:-d.valor})),
+      ].sort((a,b)=>(a.data||"").localeCompare(b.data||""));
+      return <Modal title={`Conta de ${nomeMes}`} onClose={fechar} lg>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {caixa(<>
+            {linha(`Saldo em 1 ${MESES_S[mes-1]}`, c.saldoInicial)}
+            {linha("+ Quotas recebidas", c.quotas, {sinal:true, cor:"var(--ok)"})}
+            {linha("+ Contribuições recebidas", c.contribuicoes, {sinal:true, cor:"var(--ok)"})}
+            {linha("− Despesas", -c.despesas, {sinal:true})}
+            <div className="divider" style={{margin:"4px 0"}}/>
+            {linha(`Saldo em ${new Date(ano, mes, 0).getDate()} ${MESES_S[mes-1]}`, c.saldoFinal, {forte:true})}
+          </>)}
+          <div className="muted" style={{fontSize:13}}>Pela data em que o dinheiro entrou ou saiu. O saldo inicial é a soma de todos os meses anteriores.</div>
+          {h3(`Movimentos do mês (${ent.length})`)}
+          {ent.length===0&&<div className="muted" style={{fontSize:14}}>Sem movimentos neste mês.</div>}
+          {ent.map(m=><div key={m.id} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"6px 0",borderBottom:"1px solid var(--line-2)",fontSize:14}}>
+            <span style={{display:"flex",flexDirection:"column",minWidth:0}}><span style={{fontWeight:700}}>{m.desc}</span><span className="muted" style={{fontSize:12}}>{fmtDateCurta(m.data)||"sem data"}</span></span>
+            <span className="mono" style={{flexShrink:0,color:m.v>0?"var(--ok)":"var(--ink)"}}>{fmtSinal(m.v)}</span></div>)}
+          <button className="btn btn-outline" style={{alignSelf:"flex-start"}} onClick={()=>{ fechar(); irPara("relatorios"); }}><Icon n="file" s={16}/>Relatório do mês</button>
+        </div>
+      </Modal>;
+    }
+
+    const dm = despesas.filter(d=>(d.data||"").startsWith(k)).sort((a,b)=>(a.data||"").localeCompare(b.data||""));
+    const tot = dm.reduce((s,d)=>s+d.valor,0);
+    const cats = {}; dm.forEach(d=>{ cats[d.categoria||"Outros"]=(cats[d.categoria||"Outros"]||0)+d.valor; });
+    return <Modal title={`Despesas de ${nomeMes}`} onClose={fechar} lg>
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        {caixa(<>
+          {Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([n,v])=><div key={n}>{linha(`${n} (${Math.round(v/tot*100)}%)`, v)}</div>)}
+          <div className="divider" style={{margin:"4px 0"}}/>
+          {linha(`Total (${dm.length} ${dm.length===1?"lançamento":"lançamentos"})`, tot, {forte:true})}
+        </>)}
+        <div>{dm.map(d=><div key={d.id} style={{display:"flex",justifyContent:"space-between",gap:10,padding:"6px 0",borderBottom:"1px solid var(--line-2)",fontSize:14}}>
+          <span style={{display:"flex",flexDirection:"column",minWidth:0}}><span style={{fontWeight:700}}>{d.descricao}</span><span className="muted" style={{fontSize:12}}>{fmtDateCurta(d.data)} · {d.categoria}{d.fornecedor?` · ${d.fornecedor}`:""}</span></span>
+          <span className="mono" style={{flexShrink:0}}>{fmtNum(d.valor)}</span></div>)}</div>
+        <button className="btn btn-outline" style={{alignSelf:"flex-start"}} onClick={()=>{ fechar(); setFDAno(String(ano)); setFDCat(""); setFDTxt(""); irPara("despesas"); }}><Icon n="receipt" s={16}/>Abrir em Despesas</button>
+      </div>
+    </Modal>;
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -1322,8 +1413,8 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
           <legend className="lbl" style={{marginBottom:6}}>Apartamentos que não participam</legend>
           <div style={{maxHeight:180,overflowY:"auto",border:"1.5px solid var(--line-3)",borderRadius:10,padding:"4px 10px"}}>
             {fracoesOrd.map(f=>(
-              <CheckRow key={f.id} label={`${f.numero} — ${nomeApt(f)}`} checked={(form.excluidos||[]).includes(f.numero)}
-                onChange={v=>sf("excluidos")(v?[...(form.excluidos||[]),f.numero]:(form.excluidos||[]).filter(n=>n!==f.numero))}/>
+              <CheckRow key={f.id} label={`${f.numero} — ${nomeApt(f)}${inativa(f)?" (inactivo, não participa)":""}`} checked={inativa(f)||(form.excluidos||[]).includes(f.numero)}
+                onChange={v=>{ if(inativa(f)) return; sf("excluidos")(v?[...(form.excluidos||[]),f.numero]:(form.excluidos||[]).filter(n=>n!==f.numero)); }}/>
             ))}
           </div>
         </fieldset>
