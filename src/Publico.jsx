@@ -428,6 +428,10 @@ export function PublicView({appData, offline, onGestor}) {
   const avisosSorted = [...avisos].sort((a,b)=>(b.data||"").localeCompare(a.data||""));
   // O contador conta os avisos recentes de todos os tipos — os mesmos que o separador marca como "Novo"
   const novos = avisosSorted.filter(a=>(a.data||"")>=dias30()).length;
+  // C3 — aviso em destaque: o mais recente dos últimos 30 dias, até o morador o fechar
+  const destaque = avisosSorted.find(a=>(a.data||"")>=dias30());
+  const [fechado,setFechado] = useState(()=>stGet("condo_aviso_fechado"));
+  const fecharDestaque = ()=>{ stSet("condo_aviso_fechado", destaque.id); setFechado(destaque.id); };
   const TABS = [["quotas","Quotas"],["contribuicoes","Contribuições"],["contas","Contas"],["avisos","Avisos"]];
 
   return (
@@ -452,6 +456,22 @@ export function PublicView({appData, offline, onGestor}) {
       </nav>
 
       <main style={{maxWidth:840,margin:"0 auto",padding:"16px 16px 8px"}}>
+        {destaque&&fechado!==destaque.id&&tab!=="avisos"&&(
+          <section className="card anim" aria-label="Aviso em destaque" style={{marginBottom:16,borderLeft:"5px solid var(--info)",display:"flex",flexDirection:"column",gap:6,padding:"14px 16px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+              <span style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <Icon n="megaphone" s={18} style={{color:"var(--info)"}}/>
+                <span className={`tag ${TIPO_TAG[destaque.tipo]||"tag-red"}`}>{destaque.tipo}</span>
+                <span style={{fontSize:13,color:"var(--ink-2)"}}>{fmtDate(destaque.data)}</span>
+              </span>
+              <button className="btn btn-ghost btn-icon btn-sm" onClick={fecharDestaque} aria-label="Fechar aviso em destaque"><Icon n="x" s={16}/></button>
+            </div>
+            <b style={{fontSize:16,lineHeight:1.35}}>{destaque.titulo}</b>
+            {destaque.conteudo&&<p style={{fontSize:14,color:"#3D3832",lineHeight:1.5,display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical",overflow:"hidden",whiteSpace:"pre-wrap"}}>{destaque.conteudo}</p>}
+            <button className="btn btn-ghost btn-sm" style={{alignSelf:"flex-start",paddingLeft:0,color:"var(--info)"}} onClick={()=>setTab("avisos")}>
+              {novos>1?`Ver todos os avisos (${novos} recentes)`:"Ler aviso completo"}<Icon n="right" s={15}/></button>
+          </section>
+        )}
         {tab!=="contas"&&tab!=="avisos"&&<MeuApartamento key={existe?meuApt:"-"} appData={appData} guardado={existe?meuApt:null} onGuardar={setMeuApt}/>}
         {tab==="quotas"&&<PredioQuotas appData={appData}/>}
         {/* "Como pagar" no fim da página, excepto quando já aparece no cartão do meu apartamento (com dívida) */}
