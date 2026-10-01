@@ -22,6 +22,7 @@ Ao passar para o `main`: mudar `APP_VERSAO` (`src/lib.js`) e `VERSAO` (`Code.gs`
 - **D1** Recibo de pagamento de quota: aparece depois de registar ("Recibo" no aviso), no mapa de quotas e no histórico. Imprimir/PDF e envio por WhatsApp.
 - **G1** Registo de alterações: aba "🗒️ Registo" com cada gravação (e os valores antes, em edições e apagamentos). Consultável em *Gestão*.
 - **G3** Cópias de segurança: pasta "Cópias de segurança" ao lado da folha, cópia semanal automática (2ª feira) e "Fazer cópia agora" em *Gestão*. Ficam as últimas 12.
+- **Relatório anual com corte** (pedido extra): opção "Período" — ano completo, até ao fim de um trimestre (Mar/Jun/Set) ou de qualquer mês. Totais, mês a mês, despesas e contribuições param nesse mês; os atrasos são os que existiam no fim desse mês.
 - **G4** Fecho de período em *Gestão*: quotas, contribuições e despesas com data até ao mês fechado deixam de poder ser criadas, alteradas ou apagadas (app e Apps Script). Chave `fechado_ate` na aba Configurações.
 
 ## ✅ Contribuições fechadas (app + Code.gs)

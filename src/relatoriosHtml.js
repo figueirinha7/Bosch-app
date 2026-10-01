@@ -79,8 +79,8 @@ function tabelaCategorias(despesas) {
   return `<div class="cats">${rows.map(([c,v])=>`<span>${esc(c)}</span><span class="bar"><i style="width:${Math.round(v/max*100)}%"></i></span><span class="n">${kz(v)} · ${Math.round(v/tot*100)}%</span>`).join("")}</div>`;
 }
 
-function tabelaAtrasos(appData, { nomes=true, publico=false }) {
-  const linhas = appData.fracoes.map(f=>({ f, ...situacaoApt(f, appData) })).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
+function tabelaAtrasos(appData, { nomes=true, publico=false, ate }) {
+  const linhas = appData.fracoes.map(f=>({ f, ...situacaoApt(f, appData, ate) })).filter(x=>x.total>0).sort((a,b)=>b.total-a.total);
   if (!linhas.length) return `<p class="ok">Sem valores em atraso.</p>`;
   const tq = linhas.reduce((s,x)=>s+x.qi.divida,0), tc = linhas.reduce((s,x)=>s+x.contribs.reduce((a,c)=>a+c.divida,0),0);
   const comNomes = nomes && !publico;
@@ -182,20 +182,27 @@ ${tabelaAtrasos(appData, { nomes, publico })}`;
 /* ═══════════════════════════════════════════════════════════════
    ANUAL
 ═══════════════════════════════════════════════════════════════ */
+// opts.ateMes (1–12): corte no fim desse mês (ex.: 9 = até Setembro, 3.º trimestre).
+// Sem corte: o ano completo (ou até ao mês actual, no ano corrente).
 export function relatorioAnual(appData, ano, opts={}) {
-  const { nomes=true, aprovacao=true } = opts;
+  const { nomes=true, aprovacao=true, ateMes } = opts;
   const { config, fracoes, contribuicoes, pagamentosContribuicao, despesas=[] } = appData;
   const fluxo = fluxoMensal(appData);
   let recAnte=0, despAnte=0, recAno=0, despAno=0;
+  const now = new Date();
+  const fimNatural = ano < now.getFullYear() ? 12 : ano > now.getFullYear() ? 0 : now.getMonth()+1;
+  const fimMes = ateMes ? Math.min(ateMes, fimNatural) : fimNatural;
+  const corte = ateMes ? `${ano}-${pad2(ateMes)}` : `${ano}-12`;
+  const trim = { 3:"1.º trimestre", 6:"2.º trimestre", 9:"3.º trimestre", 12:"4.º trimestre" }[ateMes];
+  const periodo = ateMes ? `Até ${MESES[ateMes-1]} ${ano}${trim?` (${trim})`:""}` : "";
   Object.entries(fluxo).forEach(([k,v])=>{
     const r = v.quotas+v.contribuicoes;
     if (k < `${ano}-01`) { recAnte+=r; despAnte+=v.despesas; }
-    else if (k.startsWith(`${ano}-`)) { recAno+=r; despAno+=v.despesas; }
+    else if (k.startsWith(`${ano}-`) && k <= corte) { recAno+=r; despAno+=v.despesas; }
   });
   const transitado = recAnte-despAnte, saldoAno = recAno-despAno, saldoFinal = transitado+saldoAno;
-  const now = new Date(), fimMes = ano < now.getFullYear() ? 12 : ano > now.getFullYear() ? 0 : now.getMonth()+1;
 
-  const linhasMes = MESES.map((nm,i)=>{
+  const linhasMes = MESES.slice(0, ateMes || 12).map((nm,i)=>{
     const m=i+1, c = contaMes(fluxo, ano, m), vazio = !c.entradas && !c.despesas;
     const cob = m<=fimMes ? cobrancaMes(appData, ano, m) : null;
     return `<tr class="${vazio?"mut":""}"><td>${nm}</td><td class="n">${c.entradas?kz(c.entradas):"—"}</td><td class="n">${c.despesas?kz(c.despesas):"—"}</td>
@@ -203,12 +210,13 @@ export function relatorioAnual(appData, ano, opts={}) {
 <td class="n">${cob&&cob.elegiveis?`${cob.pagaram}/${cob.elegiveis}`:"—"}</td></tr>`;
   }).join("");
 
-  const despAnoList = despesas.filter(d=>(d.data||"").startsWith(`${ano}-`)).sort((a,b)=>(a.data||"").localeCompare(b.data||""));
+  const despAnoList = despesas.filter(d=>(d.data||"").startsWith(`${ano}-`) && d.data.slice(0,7) <= corte).sort((a,b)=>(a.data||"").localeCompare(b.data||""));
 
   const contribRows = contribuicoes.map(c=>{
     const meta = metaContrib(c, fracoes);
-    const rec = pagamentosContribuicao.filter(p=>p.contribuicaoId===c.id&&p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
-    const falta = fracoes.reduce((s,f)=>s+contribInfo(c,f,pagamentosContribuicao).divida,0);
+    const pcs = ateMes ? pagamentosContribuicao.filter(p=>!p.data || p.data.slice(0,7) <= corte) : pagamentosContribuicao;
+    const rec = pcs.filter(p=>p.contribuicaoId===c.id&&p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0);
+    const falta = fracoes.reduce((s,f)=>s+contribInfo(c,f,pcs).divida,0);
     return `<tr><td>${esc(c.titulo)}${c.dataVencimento?` <span class="mut">· prazo ${esc(fmtDateNum(c.dataVencimento))}</span>`:""}</td><td class="n">${meta?kz(meta):"livre"}</td><td class="n">${kz(rec)}</td><td class="n">${falta?kz(falta):"—"}</td><td>${esc(c.estado||"Aberto")}</td></tr>`;
   }).join("");
 
@@ -219,17 +227,17 @@ export function relatorioAnual(appData, ano, opts={}) {
     <div class="linha"><span>Receitas acumuladas</span><span class="n">${kz(recAnte)}</span></div>
     <div class="linha"><span>Despesas acumuladas</span><span class="n">${fmtSinal(-despAnte)}</span></div>
     <div class="linha b"><span>Saldo transitado</span><span class="n">${kz(transitado)}</span></div></div>
-  <div class="caixa"><div class="t">${ano}</div>
+  <div class="caixa"><div class="t">${ano}${ateMes?` (até ${MESES[ateMes-1]})`:""}</div>
     <div class="linha"><span>Receitas do ano</span><span class="n pos">${fmtSinal(recAno)}</span></div>
     <div class="linha"><span>Despesas do ano</span><span class="n neg">${fmtSinal(-despAno)}</span></div>
     <div class="linha b"><span>Saldo do ano</span><span class="n">${fmtSinal(saldoAno)}</span></div></div>
 </div>
-<div class="conta" style="grid-template-columns:1fr auto;margin-top:12px"><div><span style="color:#1C1A16">Saldo final (transitado + ${ano})</span></div><div><b>${kz(saldoFinal)} Kz</b></div></div>
+<div class="conta" style="grid-template-columns:1fr auto;margin-top:12px"><div><span style="color:#1C1A16">Saldo ${ateMes?`em ${new Date(ano, ateMes, 0).getDate()} ${MESES[ateMes-1]} ${ano}`:"final"} (transitado + ${ano})</span></div><div><b>${kz(saldoFinal)} Kz</b></div></div>
 
 <h2>2. Mês a mês</h2>
 <table><thead><tr><th>Mês</th><th class="n">Entradas</th><th class="n">Despesas</th><th class="n">Saldo do mês</th><th class="n">Saldo em caixa</th><th class="n">Quotas pagas</th></tr></thead>
 <tbody>${linhasMes}</tbody>
-<tfoot><tr><td>Total ${ano}</td><td class="n">${kz(recAno)}</td><td class="n">${kz(despAno)}</td><td class="n">${fmtSinal(saldoAno)}</td><td class="n">${kz(saldoFinal)}</td><td></td></tr></tfoot></table>
+<tfoot><tr><td>Total ${ano}${ateMes?` (até ${MESES_S[ateMes-1]})`:""}</td><td class="n">${kz(recAno)}</td><td class="n">${kz(despAno)}</td><td class="n">${fmtSinal(saldoAno)}</td><td class="n">${kz(saldoFinal)}</td><td></td></tr></tfoot></table>
 <p class="nota">Entradas e despesas pela data em que o dinheiro entrou ou saiu. “Quotas pagas” conta os apartamentos com a quota desse mês paga.</p>
 
 <h2>3. Despesas por categoria</h2>
@@ -238,14 +246,15 @@ ${despAnoList.length?tabelaCategorias(despAnoList):`<p class="mut">Sem despesas 
 ${contribuicoes.length?`<h2>4. Contribuições</h2>
 <table><thead><tr><th>Contribuição</th><th class="n">Meta</th><th class="n">Recebido</th><th class="n">Em falta</th><th>Estado</th></tr></thead><tbody>${contribRows}</tbody></table>`:""}
 
-<h2>${contribuicoes.length?5:4}. Valores em atraso (acumulado)</h2>
-${tabelaAtrasos(appData, { nomes })}
+<h2>${contribuicoes.length?5:4}. Valores em atraso (acumulado${ateMes?` a ${new Date(ano, ateMes, 0).getDate()} ${MESES[ateMes-1]} ${ano}`:""})</h2>
+${ateMes?`<p class="nota">Situação no fim de ${MESES[ateMes-1]}: só contam os pagamentos feitos até essa data.</p>`:""}
+${tabelaAtrasos(appData, { nomes, ate: ateMes ? { ano, mes: ateMes } : undefined })}
 
-${despAnoList.length?`<h2>${contribuicoes.length?6:5}. Detalhe das despesas de ${ano}</h2>
+${despAnoList.length?`<h2>${contribuicoes.length?6:5}. Detalhe das despesas de ${ano}${ateMes?` (até ${MESES[ateMes-1]})`:""}</h2>
 <table><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Fornecedor</th><th class="n">Valor (Kz)</th></tr></thead><tbody>
 ${despAnoList.map(d=>`<tr><td>${esc(fmtDateNum(d.data))}</td><td>${esc(d.descricao)}</td><td class="mut">${esc(d.categoria)}</td><td class="mut">${esc(d.fornecedor||"—")}</td><td class="n">${kz(d.valor)}</td></tr>`).join("")}
 </tbody><tfoot><tr><td colspan="4">Total</td><td class="n">${kz(despAno)}</td></tr></tfoot></table>`:""}`;
-  return pagina(`Relatório anual ${ano}`, "", corpo, config, { aprovacao });
+  return pagina(`Relatório anual ${ano}`, periodo ? esc(periodo) : "", corpo, config, { aprovacao });
 }
 
 /* ═══════════════════════════════════════════════════════════════

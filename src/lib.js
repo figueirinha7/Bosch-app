@@ -138,10 +138,11 @@ export function quotaAtual(config) {
   return quotaDoMes(config, d.getFullYear(), d.getMonth()+1);
 }
 
-export function quotaInfo(fracaoId, pags, config) {
+// ate = {ano, mes}: calcula a situação no fim desse mês (por omissão, hoje)
+export function quotaInfo(fracaoId, pags, config, ate) {
   const { anoBase, mesBase } = config;
   const now = new Date();
-  const [ny, nm] = [now.getFullYear(), now.getMonth()+1];
+  const [ny, nm] = ate ? [ate.ano, ate.mes] : [now.getFullYear(), now.getMonth()+1];
   const mesesEmFalta = [];
   let y = anoBase, m = mesBase;
   while (y < ny || (y===ny && m<=nm)) {
@@ -218,10 +219,17 @@ export function metaContrib(c, fracoes) {
 }
 
 // Situação completa de um apartamento (quotas + contribuições)
-export function situacaoApt(f, appData) {
-  const { pagamentosQuota, contribuicoes, pagamentosContribuicao, config } = appData;
+// ate = {ano, mes}: situação no fim desse mês — só contam os pagamentos feitos até lá
+export function situacaoApt(f, appData, ate) {
+  const { contribuicoes, config } = appData;
+  let { pagamentosQuota, pagamentosContribuicao } = appData;
+  if (ate) {
+    const k = chaveMes(ate.ano, ate.mes);
+    pagamentosQuota = pagamentosQuota.filter(p=>{ const m=mesCaixaQuota(p); return !m || m<=k; });
+    pagamentosContribuicao = pagamentosContribuicao.filter(p=>!p.data || p.data.slice(0,7)<=k);
+  }
   const qi = semQuota(f) ? {divida:0,mesesAtraso:0,mesesEmFalta:[],totalPago:0}
-    : quotaInfo(f.id, pagamentosQuota, config);
+    : quotaInfo(f.id, pagamentosQuota, config, ate);
   const contribs = contribuicoes.map(c=>({...c,...contribInfo(c,f,pagamentosContribuicao)})).filter(c=>c.divida>0);
   const total = qi.divida + contribs.reduce((s,c)=>s+c.divida,0);
   return { qi, contribs, total };

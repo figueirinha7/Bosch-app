@@ -37,14 +37,16 @@ export function CentroRelatorios({appData, anos}) {
   const [nomes,setNomes] = useState(true);
   const [detalhe,setDetalhe] = useState(true);
   const [aprovacao,setAprovacao] = useState(true);
+  const [corte,setCorte] = useState(0);   // anual: 0 = ano completo; 3/6/9 = até ao fim do trimestre; 1–12 = até ao mês
   const f = appData.fracoes.find(x=>String(x.numero)===String(apt));
 
   const { html, nome } = useMemo(()=>{
     if (tipo==="mensal")  return { html: relatorioMensal(appData, ano, mes, { nomes, detalhe, aprovacao }), nome:`Relatorio ${MESES[mes-1]} ${ano}` };
-    if (tipo==="anual")   return { html: relatorioAnual(appData, ano, { nomes, aprovacao }), nome:`Relatorio anual ${ano}` };
+    if (tipo==="anual")   return { html: relatorioAnual(appData, ano, { nomes, aprovacao, ateMes: corte||undefined }),
+      nome:`Relatorio anual ${ano}${corte?` ate ${MESES[corte-1]}`:""}` };
     if (tipo==="extracto") return { html: relatorioExtracto(appData, f?.id), nome:`Extracto ${f?.numero||""}` };
     return { html: relatorioAtrasos(appData, { nomes }), nome:"Valores em atraso" };
-  },[appData,tipo,mes,ano,f,nomes,detalhe,aprovacao]);
+  },[appData,tipo,mes,ano,f,nomes,detalhe,aprovacao,corte]);
 
   return (
     <div className="rel-grid">
@@ -64,6 +66,17 @@ export function CentroRelatorios({appData, anos}) {
         {(tipo==="mensal"||tipo==="anual")&&<div style={{display:"grid",gridTemplateColumns:tipo==="mensal"?"1.4fr 1fr":"1fr",gap:10}}>
           {tipo==="mensal"&&<FG label="Mês"><MesSelect value={mes} onChange={setMes}/></FG>}
           <FG label="Ano"><AnoSelect value={ano} onChange={setAno} anos={anos}/></FG>
+          {tipo==="anual"&&<FG label="Período">
+            <select className="input" value={corte} onChange={e=>setCorte(+e.target.value)}>
+              <option value={0}>Ano completo</option>
+              <option value={3}>Até Março (1.º trimestre)</option>
+              <option value={6}>Até Junho (2.º trimestre)</option>
+              <option value={9}>Até Setembro (3.º trimestre)</option>
+              <optgroup label="Até ao fim do mês">
+                {MESES.map((m,i)=>![2,5,8,11].includes(i)&&<option key={i} value={i+1}>Até {m}</option>)}
+              </optgroup>
+            </select>
+          </FG>}
         </div>}
         {tipo==="extracto"&&<FG label="Apartamento">
           <AptCombo fracoes={appData.fracoes} value={apt} onChange={setApt}
