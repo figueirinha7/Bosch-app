@@ -4,7 +4,7 @@
    Regras: sem emojis, sinais + / − além da cor, cabeçalho de tabela
    repetido em cada página, linhas nunca cortadas a meio, nº de página.
 ════════════════════════════════════════════════════════════════ */
-import { MESES, MESES_S, pad2, chaveMes, fmtNum, fmtSinal, fmtDateNum, fmtDateCurta, nomeApt, lblMes,
+import { MESES, MESES_S, pad2, chaveMes, fmtNum, fmtSinal, fmtDateNum, fmtDateCurta, nomeApt, nomeResp, nomeOutro, lblMes,
   fluxoMensal, contaMes, cobrancaMes, situacaoApt, contribInfo, metaContrib, mesCaixaQuota, resumoMeses, today, inativa, quotaAtual } from "./lib.js";
 
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
@@ -84,8 +84,8 @@ function tabelaAtrasos(appData, { nomes=true, publico=false, ate }) {
   if (!linhas.length) return `<p class="ok">Sem valores em atraso.</p>`;
   const tq = linhas.reduce((s,x)=>s+x.qi.divida,0), tc = linhas.reduce((s,x)=>s+x.contribs.reduce((a,c)=>a+c.divida,0),0);
   const comNomes = nomes && !publico;
-  return `<table><thead><tr><th>Apt.</th>${comNomes?"<th>Proprietário (inquilino)</th>":""}<th>Quotas em falta</th><th>Contribuições</th><th class="n">Total (Kz)</th></tr></thead><tbody>
-${linhas.map(({f,qi,contribs,total})=>`<tr><td class="b">${esc(f.numero)}</td>${comNomes?`<td>${esc(nomeApt(f))}${f.inq_nome?` <span class="mut">(${esc(f.inq_nome)})</span>`:""}</td>`:""}
+  return `<table><thead><tr><th>Apt.</th>${comNomes?"<th>Responsável (proprietário)</th>":""}<th>Quotas em falta</th><th>Contribuições</th><th class="n">Total (Kz)</th></tr></thead><tbody>
+${linhas.map(({f,qi,contribs,total})=>`<tr><td class="b">${esc(f.numero)}</td>${comNomes?`<td>${esc(nomeResp(f))}${nomeOutro(f)?` <span class="mut">(${esc(nomeOutro(f))})</span>`:""}</td>`:""}
 <td>${qi.mesesAtraso?`${esc(resumoMeses(qi.mesesEmFalta))} · ${kz(qi.divida)}`:"—"}</td>
 <td>${contribs.length?contribs.map(c=>`${esc(c.titulo)} · ${kz(c.divida)}`).join("<br>"):"—"}</td>
 <td class="n">${kz(total)}</td></tr>`).join("")}
@@ -348,7 +348,7 @@ export function relatorioRecibo(appData, rec) {
   <div><span>Data do pagamento</span><b>${esc(fmtDateNum(rec.data))||"—"}</b></div>
   <div><span style="color:#1C1A16">Valor recebido</span><b>${kz(rec.total)} Kz</b></div>
 </div>
-<p style="margin-top:14px">Recebemos de <b>${esc(nomeApt(f)||"—")}</b>${f.inq_nome?` <span class="mut">(inquilino: ${esc(f.inq_nome)})</span>`:""} a quantia de <b>${kz(rec.total)} Kz</b>, referente a:</p>
+<p style="margin-top:14px">Recebemos de <b>${esc(nomeResp(f)||"—")}</b>${nomeOutro(f)?` <span class="mut">(inquilino do apartamento; proprietário: ${esc(nomeOutro(f))})</span>`:""} a quantia de <b>${kz(rec.total)} Kz</b>, referente a:</p>
 <table><thead><tr><th>Referente a</th><th class="n">Valor (Kz)</th></tr></thead><tbody>
 ${rec.meses.map(m=>`<tr><td>Quota de ${MESES[m.mes-1]} ${m.ano}</td><td class="n">${kz(m.valor)}</td></tr>`).join("")}
 </tbody><tfoot><tr><td>Total</td><td class="n">${kz(rec.total)}</td></tr></tfoot></table>

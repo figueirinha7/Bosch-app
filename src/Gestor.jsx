@@ -3,7 +3,7 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, R
 import { MESES, MESES_S, CATS, AVISO_TIPOS, METODOS, ESTADOS_CONTRIB, today, chaveMes, lblMes,
   fmtKz, fmtNum, fmtSinal, fmtDate, fmtDateCurta, nomeApt, apiPost, waAbrir, msgLembrete, msgAviso,
   quotaInfo, estadoMes, nivelAtraso, contribInfo, contribFechada, ordenarContribs, metaContrib, situacaoApt, intervaloMeses, alocar, resumoMeses,
-  fluxoMensal, contaMes, serieMeses, cobrancaMes, rascunhoGet, rascunhoSet, msgRecibo,
+  fluxoMensal, contaMes, serieMeses, cobrancaMes, rascunhoGet, rascunhoSet, msgRecibo, nomeResp, nomeOutro,
   inativa, semQuota, quotaDoMes, quotaAtual, historicoQuota, mesCaixaQuota, fmtDateTime } from "./lib.js";
 import { Icon, WaSvg, Modal, FG, CheckRow, Warn, Info, ModalBtns, RowActions, MesSelect, AnoSelect, Segmented,
   MesNav, Menu, AptCombo, ConfirmModal, Toast } from "./ui.jsx";
@@ -573,8 +573,8 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
               <div key={f.id} className="cob-row">
                 <span className="apt-num" style={{fontSize:17}}>{f.numero}</span>
                 <span style={{display:"flex",flexDirection:"column",minWidth:0}}>
-                  <span style={{fontSize:15,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomeApt(f)}</span>
-                  <span className="muted" style={{fontSize:13}}>{f.inq_nome?`inquilino: ${f.inq_nome}`:f.excluiQuota?"sem quota mensal":"proprietário"}</span>
+                  <span style={{fontSize:15,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomeResp(f)}</span>
+                  <span className="muted" style={{fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={f.inq_nome?`Proprietário: ${nomeApt(f)}`:undefined}>{f.inq_nome?"inquilino":f.excluiQuota?"sem quota mensal":"proprietário"}</span>
                 </span>
                 <span className="cob-falta" style={{fontSize:13,color:"#3D3832"}}>{[qi.mesesAtraso?resumoMeses(qi.mesesEmFalta):"",...contribs.map(c=>c.titulo)].filter(Boolean).join(" · ")}</span>
                 <span className="mono cob-val" style={{fontSize:15,color:"var(--divida)",textAlign:"right"}}>{fmtNum(total)}</span>
@@ -647,7 +647,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
     const cur = qAno===anoAtual ? mesAtual : 0;
     const cobrado = MESES.map((_,i)=>pagamentosQuota.filter(p=>p.ano===qAno&&p.mes===i+1&&p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0));
     const histList = [...pagamentosQuota].filter(p=>p.ano===qAno||(!p.ano&&(p.data||"").startsWith(qAno+"-")))
-      .filter(p=>!t||String(aptById(p.fracaoId)?.numero||"").toLowerCase().includes(t)||nomeApt(aptById(p.fracaoId)).toLowerCase().includes(t))
+      .filter(p=>!t||String(aptById(p.fracaoId)?.numero||"").toLowerCase().includes(t)||[nomeApt(aptById(p.fracaoId)),aptById(p.fracaoId)?.inq_nome].some(x=>String(x||"").toLowerCase().includes(t)))
       .sort((a,b)=>(b.data||"").localeCompare(a.data||"")||(b.mes-a.mes));
     return <>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:14}}>
@@ -685,7 +685,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
               return <tr key={f.id} style={{opacity:semQuota(f)?.75:1}}>
                 <td><button className="btn btn-ghost" style={{justifyContent:"flex-start",padding:"4px 6px",minHeight:36,gap:8,maxWidth:200}} onClick={()=>setDrillApt(f)} aria-label={`Detalhe do apartamento ${f.numero}`}>
                   <span className="apt-num" style={{fontSize:15,minWidth:34,textAlign:"left"}}>{f.numero}</span>
-                  <span className="hide-sm" style={{fontSize:13,fontWeight:600,color:"var(--ink)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomeApt(f)}{inativa(f)?<span className="muted" style={{fontWeight:400}}> · inactivo</span>:f.excluiQuota&&<span className="muted" style={{fontWeight:400}}> · sem quota</span>}</span>
+                  <span className="hide-sm" style={{fontSize:13,fontWeight:600,color:"var(--ink)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={nomeOutro(f)?`Proprietário: ${nomeOutro(f)}`:undefined}>{nomeResp(f)}{inativa(f)?<span className="muted" style={{fontWeight:400}}> · inactivo</span>:f.excluiQuota&&<span className="muted" style={{fontWeight:400}}> · sem quota</span>}</span>
                 </button></td>
                 {MESES.map((nm,i)=>{
                   const e = estadoMes(f, qAno, i+1, pagamentosQuota, config);
@@ -722,11 +722,11 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
 
       {hist&&<section className="card" style={{marginTop:16,overflowX:"auto"}}>
         <h2 className="h2" style={{marginBottom:8}}>Histórico de pagamentos {qAno} <span className="muted" style={{fontFamily:"Nunito",fontSize:14}}>· {histList.length} registos · <span className="mono">{fmtKz(histList.reduce((s,p)=>s+p.valor,0))}</span></span></h2>
-        <table><thead><tr><th>Data</th><th>Apt.</th><th className="hide-sm">Proprietário</th><th>Mês</th><th className="num">Valor</th><th className="hide-sm">Método</th><th></th></tr></thead>
+        <table><thead><tr><th>Data</th><th>Apt.</th><th className="hide-sm">Responsável</th><th>Mês</th><th className="num">Valor</th><th className="hide-sm">Método</th><th></th></tr></thead>
         <tbody>{histList.map(p=>{ const f=aptById(p.fracaoId); return <tr key={p.id}>
           <td className="muted" style={{fontSize:13}}>{fmtDate(p.data)}</td>
           <td><span className="apt-num">{f?.numero||"?"}</span></td>
-          <td className="hide-sm">{nomeApt(f)||"?"}</td>
+          <td className="hide-sm">{nomeResp(f)||"?"}</td>
           <td>{p.mes&&p.ano?<span className="tag tag-blue">{MESES_S[p.mes-1]} {p.ano}</span>:<span className="tag tag-red">Sem mês</span>}</td>
           <td className="num">{p.metodo==="Isento"?"—":fmtNum(p.valor)}</td>
           <td className="hide-sm muted" style={{fontSize:13}}>{p.metodo==="Isento"?<span className="tag tag-grey" title={p.referencia}>Isento</span>:(p.metodo||"—")}</td>
@@ -748,7 +748,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
             <span className="tag" style={{...CEL_Q[e.k],border:"none"}}>{EST_LBL[e.k]}</span>
-            <span style={{fontSize:15}}>{nomeApt(f)}</span>
+            <span style={{fontSize:15}}>{nomeResp(f)}{nomeOutro(f)&&<span className="muted" style={{fontSize:13}}> · proprietário: {nomeOutro(f)}</span>}</span>
           </div>
           {e.k==="falta"&&<div style={{fontSize:15,color:"var(--divida)",fontWeight:700}}>Em falta: {fmtKz(e.emFalta)}</div>}
           {e.k==="parcial"&&<div style={{fontSize:15}}>Pago {fmtKz(e.pago)} de {fmtKz(e.pago+e.emFalta)} · <b style={{color:"var(--divida)"}}>faltam {fmtKz(e.emFalta)}</b></div>}
@@ -861,12 +861,12 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
           <div className="muted" style={{fontSize:13}}>Conta pelo mês a que a quota se refere, seja qual for a data em que foi paga.</div>
           {falta.length>0&&<div>{h3(`Em falta (${falta.length})`)}
             {falta.map(x=><div key={x.f.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"6px 0",borderBottom:"1px solid var(--line-2)"}}>
-              <span style={{display:"flex",gap:10,alignItems:"center",minWidth:0}}><span className="apt-num">{x.f.numero}</span><span style={{fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomeApt(x.f)}{x.k==="parcial"&&<span className="muted"> · pagou {fmtNum(x.pago)}</span>}</span></span>
+              <span style={{display:"flex",gap:10,alignItems:"center",minWidth:0}}><span className="apt-num">{x.f.numero}</span><span style={{fontSize:14,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{nomeResp(x.f)}{x.k==="parcial"&&<span className="muted"> · pagou {fmtNum(x.pago)}</span>}</span></span>
               <span style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}><span className="mono" style={{color:"var(--divida)"}}>{fmtNum(x.emFalta)}</span>
                 <button className="btn btn-outline btn-sm" onClick={()=>{ fechar(); abrirQuota(x.f.numero,[{mes,ano}]); }}>Registar</button></span>
             </div>)}</div>}
           {pagos.length>0&&<div>{h3(`Pagaram (${pagos.length})`)}
-            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{pagos.map(x=><span key={x.f.id} className="tag tag-green" title={nomeApt(x.f)}>{x.f.numero} · {fmtNum(x.pago)}</span>)}</div></div>}
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{pagos.map(x=><span key={x.f.id} className="tag tag-green" title={nomeResp(x.f)}>{x.f.numero} · {fmtNum(x.pago)}</span>)}</div></div>}
           {(isentos.length>0||fora.length>0)&&<div className="muted" style={{fontSize:13}}>
             {isentos.length>0&&<>Isentos neste mês: {isentos.map(x=>x.f.numero).join(", ")}. </>}
             {fora.length>0&&<>Não contam: {fora.map(f=>`${f.numero} (${inativa(f)?"inactivo":"sem quota"})`).join(", ")}.</>}
@@ -1034,11 +1034,11 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
               {pcs.length>0&&<button className="btn btn-ghost" aria-expanded={aberto} onClick={()=>setAbertos(a=>({...a,[c.id]:!a[c.id]}))} style={{marginLeft:"auto"}}>
                 <Icon n={aberto?"up":"down"} s={16}/>Pagamentos ({pcs.length})</button>}
             </div>
-            {aberto&&<div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Apt.</th><th className="hide-sm">Proprietário</th><th className="num">Valor</th><th></th></tr></thead>
+            {aberto&&<div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Apt.</th><th className="hide-sm">Responsável</th><th className="num">Valor</th><th></th></tr></thead>
               <tbody>{[...pcs].sort((a,b)=>(b.data||"").localeCompare(a.data||"")).map(p=>{const f=aptById(p.fracaoId);return<tr key={p.id}>
                 <td className="muted" style={{fontSize:13}}>{fmtDate(p.data)}</td>
                 <td><span className="apt-num">{f?.numero||"?"}</span></td>
-                <td className="hide-sm">{nomeApt(f)}</td>
+                <td className="hide-sm">{nomeResp(f)}</td>
                 <td className="num">{p.metodo==="Isento"?<span className="tag tag-grey" title={p.referencia}>Isento</span>:fmtNum(p.valor)}</td>
                 <td>{bloqD(p)?<Cadeado/>:<RowActions desc={`pagamento do ${f?.numero||""}`} onEdit={p.metodo==="Isento"?null:()=>abrirPagContrib(p)}
                   onDelete={()=>apagar("delete_pagamento_contribuicao",p,`o ${p.metodo==="Isento"?"registo de isenção":"pagamento"} do apt. ${f?.numero||"?"} em “${c.titulo}”`,undoPagContrib(p))}/>}</td>
@@ -1413,7 +1413,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
           <legend className="lbl" style={{marginBottom:6}}>Apartamentos que não participam</legend>
           <div style={{maxHeight:180,overflowY:"auto",border:"1.5px solid var(--line-3)",borderRadius:10,padding:"4px 10px"}}>
             {fracoesOrd.map(f=>(
-              <CheckRow key={f.id} label={`${f.numero} — ${nomeApt(f)}${inativa(f)?" (inactivo, não participa)":""}`} checked={inativa(f)||(form.excluidos||[]).includes(f.numero)}
+              <CheckRow key={f.id} label={`${f.numero} — ${nomeResp(f)}${inativa(f)?" (inactivo, não participa)":""}`} checked={inativa(f)||(form.excluidos||[]).includes(f.numero)}
                 onChange={v=>{ if(inativa(f)) return; sf("excluidos")(v?[...(form.excluidos||[]),f.numero]:(form.excluidos||[]).filter(n=>n!==f.numero)); }}/>
             ))}
           </div>
@@ -1462,7 +1462,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
               {fracoesOrd.map(f=>{
                 const ci=c?contribInfo(c,f,pagamentosContribuicao):null;
                 const nota=ci&&!ci.isLivre?(ci.inativo?" · inactivo":ci.excluido?" · excluído":ci.isento?" · isento":ci.pago?" · já pagou":""):"";
-                return <CheckRow key={f.id} label={`${f.numero} — ${nomeApt(f)}${nota}`} checked={sel.includes(f.numero)} onChange={v=>sf("bulkApts")(v?[...sel,f.numero]:sel.filter(n=>n!==f.numero))}/>;
+                return <CheckRow key={f.id} label={`${f.numero} — ${nomeResp(f)}${nota}`} checked={sel.includes(f.numero)} onChange={v=>sf("bulkApts")(v?[...sel,f.numero]:sel.filter(n=>n!==f.numero))}/>;
               })}
             </div>
             {errs.bulk&&<span className="fg-err" role="alert" style={{marginTop:6}}><Icon n="alert" s={15}/>{errs.bulk}</span>}

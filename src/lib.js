@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════════
    Constantes, formatação, API e cálculos partilhados
 ════════════════════════════════════════════════════════════════ */
-export const APP_VERSAO = "v7.3";
+export const APP_VERSAO = "v7.4";
 export const API_URL    = "https://script.google.com/macros/s/AKfycbyvN52wjCWtvSOMrRqszVtOZC1OfSnfciOSN1iANp-vH-Ap6wIgchYlUuIu9SUyQgUsVw/exec";
 
 export const MESES   = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -25,6 +25,10 @@ export const fmtDateCurta = (d) => d ? new Date(d+"T12:00:00").toLocaleDateStrin
 export const fmtDateNum = (d) => d ? new Date(d+"T12:00:00").toLocaleDateString("pt-PT") : "";
 export const fmtDateTime = (d) => d ? new Date(d).toLocaleString("pt-PT",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "";
 export const nomeApt = (f) => f ? (f.prop_nome||f.proprietario||"") : "";
+// Responsável pelo pagamento: o inquilino, se existir; senão, o proprietário
+export const nomeResp = (f) => f ? (f.inq_nome||nomeApt(f)) : "";
+// O outro nome (para mostrar em pequeno junto do responsável): o proprietário quando há inquilino
+export const nomeOutro = (f) => f && f.inq_nome ? nomeApt(f) : "";
 export const lblMes  = (m) => `${MESES_S[m.mes-1]} ${m.ano}`;
 
 /* ── STORAGE ── */
@@ -97,7 +101,7 @@ export function msgLembrete(f, nome, qi, contribs, config) {
 // Recibo por WhatsApp (D1) — rec vem de reciboNovo / reciboDePagamento
 export function msgRecibo(rec, nome, config) {
   return [`🏢 *${config.predio}*`, "", `*Recibo de pagamento n.º ${rec.numero}*`, "",
-    `Caro(a) ${nome||nomeApt(rec.f)},`, "",
+    `Caro(a) ${nome||nomeResp(rec.f)},`, "",
     `Confirmamos a recepção de *${fmtKz(rec.total)}* do apartamento *${rec.f?.numero}*, pago a ${fmtDate(rec.data)}${rec.metodo?` (${rec.metodo})`:""}, referente a:`,
     ...rec.meses.map(m=>`• Quota ${MESES[m.mes-1]} ${m.ano}: ${fmtKz(m.valor)}`),
     "", "Obrigado.", "", `${config.gestorNome||"A gestão"}`].join("\n");

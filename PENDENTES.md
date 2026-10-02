@@ -3,7 +3,13 @@
 Lista de trabalho da app (Vercel, endereço oficial: bosch-app.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
-## 🧪 v7.3 (branch `beta`, ainda não no `main`) — título e cabeçalho da página pública
+## 🧪 v7.4 (branch `beta`, ainda não no `main`) — nome do responsável pelo pagamento
+
+- Nos ecrãs de cobrança aparece o **responsável**: o inquilino, se existir; senão, o proprietário. Painel (A cobrar e detalhes), Quotas (mapa, histórico, detalhe do mês), escolha do apartamento ao registar, Contribuições (pagamentos, lançar para vários, quem não participa), recibo e lista de atrasos.
+- Continuam a mostrar os dois: Apartamentos, detalhe do apartamento, extracto e formulário. Lembretes por WhatsApp mantêm um botão para cada um.
+- Só app; o Apps Script não muda.
+
+## ✅ v7.3 (no `main` desde 02/10/2026, PR #8) — título e cabeçalho da página pública
 
 - Título da aba do navegador: "Portal do Condomínio - Prédio da Bosch".
 - Cabeçalho da página pública com a fachada do prédio (mural) à direita, "Portal do Condomínio" em destaque e faixa com as cores do mural, que fica fixa por cima dos separadores ao fazer scroll. Mesma altura do anterior; a morada aparece só em ecrãs largos. Proposta escolhida: A + faixa da C (Claude Design).
@@ -150,6 +156,7 @@ Próximos sugeridos: 1) A5, G5 (pequenos) · 2) C5, D2, F1 · 3) B3, E1–E4 · 
 - ✅ **A3. Detalhe em todos os números do painel**: tocar em cobrança, saldo em caixa, despesas, etc. abre a lista que dá origem ao valor.
 - ✅ **A4. Estados coerentes em toda a app** (activo / inactivo / sem quota mensal) no painel, grelhas, relatórios, página pública e lembretes.
 - **A5. Multa por atraso** (`multa_atraso_pct`): calcular e mostrar separada da quota.
+- **A7. Histórico do apartamento**: registar entradas e saídas de inquilinos (e mudanças de proprietário) com datas, e saber quem era o responsável em cada mês (para recibos, extractos e dívidas antigas). Por desenhar.
 - **A6. Data real da última alteração no cabeçalho público**: hoje "Actualizado …" mostra a hora da leitura (o script devolve `new Date()` em cada pedido), por isso aparece sempre a data do dia. Passar a mostrar quando a folha foi alterada pela última vez (data de modificação do ficheiro no Drive, inclui edições à mão) com o texto "Dados de …"; sem ligação continua "Sem ligação". Mexe no `Code.gs` (nova versão a publicar) e no cabeçalho; ~0,1–0,3 s a mais por leitura. Estimativa: ~3–4% da v7.
 
 ### B. Regras de quotas

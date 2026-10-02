@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useId, isValidElement, cloneElement } from "react";
-import { MESES, nomeApt } from "./lib.js";
+import { MESES, nomeResp } from "./lib.js";
 
 /* ── FONTS ── */
 export const Fonts = () => <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Nunito:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />;
@@ -321,7 +321,7 @@ export function Menu({label, icon="more", items, align="right", btnClass="btn bt
 /* Escolher apartamento com pesquisa (nº ou nome) e a situação ao lado */
 export function AptCombo({fracoes, value, onChange, info, id, placeholder="Nº ou nome do apartamento"}) {
   const sel = fracoes.find(f=>String(f.numero)===String(value));
-  const label = f => f ? `${f.numero}${nomeApt(f)?" — "+nomeApt(f):""}` : "";
+  const label = f => f ? `${f.numero}${nomeResp(f)?" — "+nomeResp(f):""}` : "";
   const [q,setQ] = useState(null); const [open,setOpen] = useState(false); const [act,setAct] = useState(0);
   const lid = useId();
   const termo = (q??"").trim().toLowerCase();
@@ -349,7 +349,7 @@ export function AptCombo({fracoes, value, onChange, info, id, placeholder="Nº o
         {lista.map((f,i)=>{ const inf = info?info(f):null; return (
           <div key={f.id} id={`${lid}-${i}`} role="option" aria-selected={i===act} className="combo-opt"
             onMouseDown={e=>{ e.preventDefault(); escolher(f); }} onMouseEnter={()=>setAct(i)}>
-            <span style={{minWidth:0}}><b className="apt-num">{f.numero}</b> <span className="muted">{nomeApt(f)}</span></span>
+            <span style={{minWidth:0}}><b className="apt-num">{f.numero}</b> <span className="muted">{nomeResp(f)}</span></span>
             {inf&&<span style={{fontSize:13,fontWeight:700,color:inf.tone==="bad"?"var(--divida)":inf.tone==="ok"?"var(--ok)":"var(--ink-2)",whiteSpace:"nowrap"}}>{inf.txt}</span>}
           </div>); })}
       </div>}
