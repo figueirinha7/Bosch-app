@@ -1,9 +1,61 @@
 # Condomínio — Pendentes e histórico
 
-Lista de trabalho da app (Vercel: bosch-app-4xip.vercel.app) e do Apps Script
+Lista de trabalho da app (Vercel, endereço oficial: bosch-app.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
-## 🧪 v7.3 (branch `beta`, ainda não no `main`) — título e cabeçalho da página pública
+## 🧪 v7.8 (branch `beta`, ainda não no `main`) — correcção da conciliação
+
+**Mexe no Apps Script:** colar o novo `Code.gs` e publicar *Nova versão*.
+
+- O valor e a data de cada movimento passam a vir do **extracto importado** (aba "🏦 Extracto"). Antes, quando o NUM. DOC. era escrito à mão, o painel usava o valor do primeiro registo e mostrava uma diferença falsa (ex.: 7 quotas de 5 000 ligadas a um movimento de 35 000 apareciam como "35 000 para um movimento de 5 000").
+- Ao escrever o NUM. DOC. à mão num pagamento ou despesa, a app preenche a data, a descrição e o valor do movimento a partir do extracto (e o canal Banco, se estiver vazio). O Apps Script passa a aceitar estes campos na edição.
+- Painel: "Movimentos com valor diferente dos registos", com nº de registos e explicação quando são quotas recebidas pelo gestor anterior (só depositou a diferença depois de pagar despesas em dinheiro).
+
+## 🧪 v7.7 (branch `beta`, ainda não no `main`) — conciliação com o banco, fase 3
+
+**Mexe no Apps Script:** colar o novo `Code.gs` e publicar *Nova versão*.
+
+- *Gestão → Conciliação → Propor correspondências*: para cada movimento do extracto ainda sem ligação, a app propõe:
+  - **Ligar** a pagamentos ou despesas já registados sem movimento, que somem o valor ao kwanza (registos do mesmo dia primeiro, até 10 dias de diferença);
+  - **Criar** os registos em falta quando sabe de que apartamento é: quotas em falta mais antigas, depois contribuições abertas, depois adiantamento de quotas;
+  - **Despesas**: ligar a despesas sem movimento (também saídas divididas em várias despesas) ou criar uma nova (com categoria);
+  - **Manual**: quando não sabe quem pagou (ex.: "Transferência" sem NIB), o gestor escolhe o apartamento e a app refaz a proposta.
+- Confiança: *Confirmado* (NIB conhecido, ≤3 dias), *Alta*, *Média*. Vêm marcadas só as de confiança alta; nada é gravado até "Gravar seleccionadas".
+- **Livro de NIBs aprendido** das ligações já feitas (NIB, ou nome do ordenante quando não há NIB; grupos como 0/6/8/9 incluídos). Lê também a aba **"🔗 NIBs"** (cabeçalho na linha 4: `chave` = NIB de 21 dígitos ou `NOME:…`, `fracoes` = ex. `6,8,9`, `nome`), se existir — para completar com o `Etapa2_Livro_de_IBANs_v3.xlsx`.
+- Apps Script: acção `conciliar` grava tudo de uma vez (verifica todas as linhas antes; registos novos respeitam o fecho de período e só em contribuições abertas).
+- Testado com a folha beta e o extracto: 44 de 45 ligações propostas correctas; a outra (movimento sem NIB conhecido) ficou como *Média*, desmarcada.
+
+## 🧪 v7.6 (branch `beta`, ainda não no `main`) — conciliação com o banco, fase 2
+
+**Mexe no Apps Script:** colar o novo `Code.gs` e publicar *Nova versão*.
+
+- *Gestão → Conciliação → Importar extracto (.xlsx)*: lê o ficheiro "Movimentos" do banco no próprio navegador, mostra um resumo (movimentos novos, já importados, período, saldo final) e só grava ao confirmar.
+- Nova aba **"🏦 Extracto"** (criada na primeira importação): um movimento por linha, chave `num_doc` (NUM. DOC. do banco). Importar o mesmo ficheiro outra vez não duplica.
+- Na primeira importação, os `id_movimento` antigos (`EXT-AAAAMMDD-NNN`) passam a `NUM. DOC.` nas três abas (e no `referencia_doc` quando era igual); só quando a data do id coincide com a do movimento nessa posição. O id antigo fica guardado na aba Extracto (`id_antigo`).
+- Comparação com o **SALDO do extracto**: aviso no topo (igual / diferença) e coluna "Extracto" na tabela mês a mês.
+- Lista de **movimentos do extracto por identificar** (sem registo da app ligado). Para ligar à mão: editar o pagamento/despesa e escrever o NUM. DOC. em "Movimento do banco".
+- Nova dependência `read-excel-file` (0 vulnerabilidades), carregada só ao importar.
+- Testado com o extracto (407 movimentos, 407 ids convertíveis, saldo final 352 390) e a folha beta.
+
+## 🧪 v7.5 (branch `beta`, ainda não no `main`) — conciliação com o banco, fase 1
+
+**Mexe no Apps Script:** colar o novo `Code.gs` na folha e publicar *Nova versão* (beta primeiro; real só antes do merge).
+
+- Lê as colunas de reconciliação (`id_movimento`, `data_extrato`, `descricao_extrato`, `valor_movimento_kz`, `canal`, `confianca`, `nota_reconciliacao`) das abas de quotas, pagamentos de contribuições e despesas. **Só para o gestor** (as descrições têm NIBs e nomes); a página pública não as recebe.
+- `canal`: Banco, Numerário, Gestor anterior, Isento, Acerto ("Sebastião" e "Isento (app)" são lidos como Gestor anterior e Isento). Pagamentos registados em Numerário ficam logo com canal Numerário.
+- Estado de cada registo: **no banco** (tem movimento), **fora do banco** (numerário, gestor anterior, acerto), **por conciliar**, isento. Sinal no histórico de quotas (com filtro), no detalhe de cada mês, nos pagamentos de contribuições e nas despesas; ponto laranja no mapa de quotas nos meses por conciliar.
+- Editar um pagamento ou despesa permite mudar o canal, o movimento do banco e a nota.
+- *Gestão → Conciliação com o banco*: saldo no banco pelos movimentos ligados + entradas/despesas sem movimento + movimentos partilhados = saldo da app; comparação mês a mês (últimos 12 meses); lista do que está sem movimento.
+- **Correcção:** uma coluna que não existe numa aba passa a ser criada no fim, em vez de se usar a posição por omissão. Na folha beta a aba Fracções não tem `exclui_quota` e a app escrevia por cima de `observacoes`. **Confirmar se a folha real tem a coluna `exclui_quota`.**
+- Verificado com a folha beta e o extracto: 407 movimentos ligados; saldo do banco reconstruído = 352 390 (igual ao extracto, também em Dez/2025 e Ago/2026); diferença de 35 000 = quotas da fracção 32 em numerário.
+
+## 🧪 v7.4 (branch `beta`, ainda não no `main`) — nome do responsável pelo pagamento
+
+- Nos ecrãs de cobrança aparece o **responsável**: o inquilino, se existir; senão, o proprietário. Painel (A cobrar e detalhes), Quotas (mapa, histórico, detalhe do mês), escolha do apartamento ao registar, Contribuições (pagamentos, lançar para vários, quem não participa), recibo e lista de atrasos.
+- Continuam a mostrar os dois: Apartamentos, detalhe do apartamento, extracto e formulário. Lembretes por WhatsApp mantêm um botão para cada um.
+- Só app; o Apps Script não muda.
+
+## ✅ v7.3 (no `main` desde 02/10/2026, PR #8) — título e cabeçalho da página pública
 
 - Título da aba do navegador: "Portal do Condomínio - Prédio da Bosch".
 - Cabeçalho da página pública com a fachada do prédio (mural) à direita, "Portal do Condomínio" em destaque e faixa com as cores do mural, que fica fixa por cima dos separadores ao fazer scroll. Mesma altura do anterior; a morada aparece só em ecrãs largos. Proposta escolhida: A + faixa da C (Claude Design).
@@ -150,6 +202,10 @@ Próximos sugeridos: 1) A5, G5 (pequenos) · 2) C5, D2, F1 · 3) B3, E1–E4 · 
 - ✅ **A3. Detalhe em todos os números do painel**: tocar em cobrança, saldo em caixa, despesas, etc. abre a lista que dá origem ao valor.
 - ✅ **A4. Estados coerentes em toda a app** (activo / inactivo / sem quota mensal) no painel, grelhas, relatórios, página pública e lembretes.
 - **A5. Multa por atraso** (`multa_atraso_pct`): calcular e mostrar separada da quota.
+- **A8. Conciliação com o banco — fases 2 e 3** (fase 1 na v7.5). Decisões tomadas: chave dos movimentos = `NUM. DOC.` do extracto (o `NUM. OPER.` não é único); livro de NIBs importado na fase 3 (de `Etapa2_Livro_de_IBANs_v3.xlsx`); canal com lista fixa; fracção 0 mantém os "recebimentos não identificados".
+  - ✅ **Fase 2 (feita na v7.6):** importar o extracto (.xlsx "Movimentos", cabeçalho na linha 7) para uma aba "🏦 Extracto" sem duplicar; converter os `id_movimento` antigos (`EXT-AAAAMMDD-NNN`) para `NUM. DOC.`; lista de movimentos por identificar; comparação com o SALDO do extracto.
+  - ✅ **Fase 3 (feita na v7.7):** aba "🔗 NIBs" (NIB/nome → apartamento ou grupo: 0/6/8/9, 4/5, 24/25, 26/27, 34/35) que a app aprende; propostas de correspondência (ligar a registos existentes, criar em falta, mostrar registos sem movimento), também para despesas.
+- **A7. Histórico do apartamento**: registar entradas e saídas de inquilinos (e mudanças de proprietário) com datas, e saber quem era o responsável em cada mês (para recibos, extractos e dívidas antigas). Por desenhar.
 - **A6. Data real da última alteração no cabeçalho público**: hoje "Actualizado …" mostra a hora da leitura (o script devolve `new Date()` em cada pedido), por isso aparece sempre a data do dia. Passar a mostrar quando a folha foi alterada pela última vez (data de modificação do ficheiro no Drive, inclui edições à mão) com o texto "Dados de …"; sem ligação continua "Sem ligação". Mexe no `Code.gs` (nova versão a publicar) e no cabeçalho; ~0,1–0,3 s a mais por leitura. Estimativa: ~3–4% da v7.
 
 ### B. Regras de quotas

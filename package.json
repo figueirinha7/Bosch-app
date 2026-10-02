@@ -11,6 +11,7 @@
     "jspdf": "^4.2.1",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
+    "read-excel-file": "^9.3.10",
     "recharts": "^2.0.0"
   },
   "devDependencies": {

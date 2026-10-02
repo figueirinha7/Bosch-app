@@ -1,8 +1,43 @@
 // ═══════════════════════════════════════════════════════════════
-//  CONDOMÍNIO — Google Apps Script API  v7
+//  CONDOMÍNIO — Google Apps Script API  v7.8
 //  Cole este código em: script.google.com → projecto ligado ao Sheets
 //  Depois: Implementar → Gerir implementações → editar → Nova versão
 //          (Executar como: Eu · Acesso: Qualquer pessoa)
+//
+//  NOVO NA v7.8
+//  • As edições de quotas, pagamentos de contribuições e despesas aceitam
+//    também data_extrato, descricao_extrato e valor_movimento_kz (a app
+//    preenche-os do extracto quando o NUM. DOC. é escrito à mão).
+//
+//  NOVO NA v7.7 — CONCILIAÇÃO COM O BANCO (fase 3)
+//  • conciliar: grava de uma vez as propostas aceites pelo gestor — liga
+//    registos existentes a um movimento do extracto (só as colunas de
+//    reconciliação) e cria os registos em falta (quotas, pagamentos de
+//    contribuições, despesas) já ligados. Verifica todas as linhas antes de
+//    escrever e respeita o fecho de período nos registos novos.
+//  • Lê a aba "🔗 NIBs" (chave, fracoes, nome, nota), se existir: completa o
+//    livro de NIBs que a app aprende das ligações já feitas.
+//
+//  NOVO NA v7.6 — CONCILIAÇÃO COM O BANCO (fase 2)
+//  • Nova aba "🏦 Extracto" (criada na primeira importação): um movimento
+//    do banco por linha, identificado pelo NUM. DOC. (único; o NUM. OPER.
+//    repete-se). Importar o mesmo extracto outra vez não duplica nada.
+//  • converter_ids_movimento: troca os id_movimento antigos
+//    (EXT-AAAAMMDD-NNN, que dependiam da ordem do ficheiro) pelo NUM. DOC.
+//    nas abas de quotas, contribuições e despesas (e no referencia_doc
+//    quando era igual ao id antigo). O id antigo fica na aba Extracto.
+//
+//  NOVO NA v7.5 — CONCILIAÇÃO COM O BANCO (fase 1)
+//  • Lê as colunas de reconciliação das abas Quotas, Pgtos. Contribuições e
+//    Despesas (id_movimento, data_extrato, descricao_extrato,
+//    valor_movimento_kz, canal, confianca, nota_reconciliacao). Só seguem
+//    para o gestor: as descrições têm NIBs e nomes.
+//  • canal: Banco, Numerário, Gestor anterior, Isento, Acerto (os valores
+//    antigos "Sebastião" e "Isento (app)" são lidos como Gestor anterior e
+//    Isento). Pagamentos registados em Numerário ficam com canal Numerário.
+//  • CORRECÇÃO: uma coluna que não existe na aba passa a ser criada no fim
+//    (antes usava a posição por omissão, que podia ser outra coluna — ex.:
+//    exclui_quota a escrever por cima de observacoes na aba Fracções).
 //
 //  NOVO NA v7
 //  • Apartamentos inactivos (A2): fracao_ativa passa a poder ser editada
@@ -59,7 +94,7 @@
 //  • Editar e apagar lançamentos (quotas, contribuições, despesas, avisos).
 // ═══════════════════════════════════════════════════════════════
 
-const VERSAO         = "v7";
+const VERSAO         = "v7.8";
 const SS             = SpreadsheetApp.getActiveSpreadsheet();
 const PROPS          = PropertiesService.getScriptProperties();
 const SESSAO_HORAS   = 8;   // duração de uma sessão de gestor
@@ -75,8 +110,19 @@ const ABA = {
   DESPESAS: "🧾 Despesas",
   AVISOS:   "📢 Avisos",
   QVAL:     "💲 Valor da Quota",
+  EXT:      "🏦 Extracto",
 };
 
+// Colunas de reconciliação com o extracto bancário (iguais nas três abas de movimentos)
+const CAMPOS_REC = {
+  idMov:        ["id_movimento", null],
+  dataExtrato:  ["data_extrato", null],
+  descExtrato:  ["descricao_extrato", null],
+  valorMov:     ["valor_movimento_kz", null],
+  canal:        ["canal", null],
+  confianca:    ["confianca", null],
+  notaRec:      ["nota_reconciliacao", null],
+};
 // Esquema de colunas de cada aba: campo → [cabeçalho, coluna por omissão].
 // A coluna é procurada pelo nome do cabeçalho (com ou sem *); se não existir
 // usa a posição por omissão. Coluna null = criada no fim quando necessária.
@@ -105,6 +151,7 @@ const ESQUEMA = {
     metodo:        ["metodo_pagamento", 6],
     referencia:    ["referencia_doc", 7],
     observacoes:   ["observacoes", 8],
+    ...CAMPOS_REC,
   }},
   CONTRIB: { aba: ABA.CONTRIB, hdr: 4, campos: {
     titulo:         ["titulo", 1],
@@ -126,6 +173,7 @@ const ESQUEMA = {
     referencia:          ["referencia_doc", 6],
     observacoes:         ["observacoes", 7],
     contribuicao_id:     ["contribuicao_id", null],
+    ...CAMPOS_REC,
   }},
   DESPESAS: { aba: ABA.DESPESAS, hdr: 4, campos: {
     data:        ["data", 1],
@@ -136,6 +184,7 @@ const ESQUEMA = {
     numFatura:   ["num_fatura", 6],
     pagoPor:     ["pago_por", 7],
     observacoes: ["observacoes", 8],
+    ...CAMPOS_REC,
   }},
   AVISOS: { aba: ABA.AVISOS, hdr: 4, campos: {
     tipo:     ["tipo", 1],
@@ -153,7 +202,38 @@ const ESQUEMA = {
 };
 
 // Campos gravados como número
-const CAMPOS_NUM = ["valor", "mes", "ano", "valorPorFracao", "valorTotal"];
+const CAMPOS_NUM = ["valor", "mes", "ano", "valorPorFracao", "valorTotal", "valorMov"];
+
+// Valores de canal: os antigos passam para a lista fixa
+function normCanal(v) {
+  const s = String(v || "").trim();
+  const l = s.toLowerCase();
+  if (!s) return "";
+  if (l === "sebastião" || l === "sebastiao" || l === "gestor anterior") return "Gestor anterior";
+  if (l.indexOf("isento") === 0) return "Isento";
+  if (l === "numerário" || l === "numerario") return "Numerário";
+  if (l === "banco") return "Banco";
+  if (l === "acerto") return "Acerto";
+  return s;
+}
+// Canal de um pagamento novo: Numerário fica logo marcado; os outros ficam "por conciliar"
+function canalNovo(data) {
+  if (data.canal) return normCanal(data.canal);
+  return data.metodo === "Numerário" ? "Numerário" : undefined;
+}
+// Lê as colunas de reconciliação de uma linha (objecto de sheetToObjects)
+function lerRec(o) {
+  const vm = o["valor_movimento_kz"];
+  return {
+    idMov:       String(o["id_movimento"] || "").trim(),
+    dataExtrato: o["data_extrato"] || "",
+    descExtrato: o["descricao_extrato"] || "",
+    valorMov:    vm === "" || vm === undefined ? null : num(vm),
+    canal:       normCanal(o["canal"]),
+    confianca:   o["confianca"] || "",
+    notaRec:     o["nota_reconciliacao"] || "",
+  };
+}
 
 
 // ── RESPOSTA JSON ────────────────────────────────────────────────
@@ -223,8 +303,9 @@ function resolverColunas(esq, sheet, criar) {
     const [nome, def] = esq.campos[k];
     const i = headers.indexOf(nome);
     if (i >= 0) cols[k] = i + 1;
-    else if (def) cols[k] = def;
+    // Coluna em falta: cria-a no fim (nunca escreve na posição por omissão se lá estiver outra coluna)
     else if (criar) cols[k] = ensureColumn(sheet, esq.hdr, nome);
+    else if (def && !headers[def - 1]) cols[k] = def;
   });
   return cols;
 }
@@ -295,6 +376,27 @@ function ensureAvisosSheet() {
 
 
 // ── ABA VALOR DA QUOTA (cria se não existir) ─────────────────────
+// ── ABA EXTRACTO (cria se não existir) ───────────────────────────
+const EXT_COLS = ["num_doc", "data_mov", "data_valor", "pedido_num", "num_oper", "descricao", "valor_kz", "saldo_kz", "id_antigo", "importado_em"];
+function ensureExtractoSheet() {
+  let sheet = SS.getSheetByName(ABA.EXT);
+  if (!sheet) {
+    sheet = SS.insertSheet(ABA.EXT);
+    sheet.getRange(1, 1).setValue("Movimentos do extracto bancário importados pela app (não editar à mão)").setFontWeight("bold");
+    sheet.getRange(2, 1).setValue("Chave: num_doc (NUM. DOC. do banco). id_antigo = identificador usado antes (EXT-AAAAMMDD-NNN).");
+    sheet.getRange(4, 1, 1, EXT_COLS.length).setValues([EXT_COLS]).setFontWeight("bold");
+    sheet.getRange(5, 1, 1000, 5).setNumberFormat("@");   // num_doc, datas e números do banco como texto
+  }
+  return sheet;
+}
+function readExtracto() {
+  return sheetToObjects(ABA.EXT).filter(m => m["num_doc"]).map(m => ({
+    numDoc: String(m["num_doc"]).trim(), dataMov: m["data_mov"] || "", dataValor: m["data_valor"] || "",
+    pedido: m["pedido_num"] || "", numOper: m["num_oper"] || "", descricao: m["descricao"] || "",
+    valor: num(m["valor_kz"]), saldo: m["saldo_kz"] === "" ? null : num(m["saldo_kz"]), idAntigo: m["id_antigo"] || "",
+  }));
+}
+
 function ensureQuotaSheet() {
   let sheet = SS.getSheetByName(ABA.QVAL);
   if (!sheet) {
@@ -475,6 +577,7 @@ function lerDados() {
         metodo:      q["metodo_pagamento"] || "",
         referencia:  q["referencia_doc"] || "",
         observacoes: q["observacoes"] || "",
+        ...lerRec(q),
         _row:        q._row,
         _sig:        q._sig,
       };
@@ -517,6 +620,7 @@ function lerDados() {
         valor:          num(p["valor_kz*"] || p["valor_kz"]),
         metodo:         p["metodo_pagamento"] || "",
         referencia:     p["referencia_doc"] || "",
+        ...lerRec(p),
         _row:           p._row,
         _sig:           p._sig,
       };
@@ -533,6 +637,7 @@ function lerDados() {
       fornecedor:  d["fornecedor"] || "",
       numFatura:   d["num_fatura"] || "",
       observacoes: d["observacoes"] || "",
+      ...lerRec(d),
       _row:        d._row,
       _sig:        d._sig,
     }));
@@ -580,6 +685,8 @@ function lerDados() {
     pagamentosContribuicao: pagContribNorm,
     despesas:               despesasNorm,
     avisos:                 avisosNorm,
+    extracto:               readExtracto(),
+    nibs:                   sheetToObjects("🔗 NIBs").filter(n => n["chave"]).map(n => ({ chave: String(n["chave"]).trim(), fracoes: String(n["fracoes"] || ""), nome: n["nome"] || "" })),
   };
 }
 
@@ -787,6 +894,24 @@ const LOG = { antes: null, aba: "", linha: "" };
 const ABA_REGISTO = "🗒️ Registo";
 const SEM_REGISTO = ["get_registo", "list_copias"];
 
+// Troca valores numa coluna (por cabeçalho) de uma aba, de uma só vez. mapa: {antigo: novo}
+function trocarNaColuna(nomeAba, hdr, cabecalho, mapa, soSeIgualA) {
+  const sh = SS.getSheetByName(nomeAba);
+  if (!sh || sh.getLastRow() <= hdr) return 0;
+  const col = headersOf(sh, hdr).indexOf(cabecalho) + 1;
+  if (!col) return 0;
+  const n = sh.getLastRow() - hdr;
+  const rg = sh.getRange(hdr + 1, col, n, 1);
+  const v = rg.getValues();
+  let mud = 0;
+  for (let i = 0; i < n; i++) {
+    const k = String(v[i][0]).trim();
+    if (k && mapa[k] !== undefined) { v[i][0] = mapa[k]; mud++; }
+  }
+  if (mud) { rg.setNumberFormat("@"); rg.setValues(v); }
+  return mud;
+}
+
 function registar(action, data, res) {
   try {
     let sheet = SS.getSheetByName(ABA_REGISTO);
@@ -797,6 +922,10 @@ function registar(action, data, res) {
     }
     const limpo = {};
     Object.keys(data || {}).forEach(k => { if (k !== "_sig" && k !== "password") limpo[k] = data[k]; });
+    // Importações grandes: no registo fica só o resumo
+    if (Array.isArray(limpo.movimentos)) limpo.movimentos = limpo.movimentos.length + " movimentos";
+    if (limpo.mapa && typeof limpo.mapa === "object") limpo.mapa = Object.keys(limpo.mapa).length + " identificadores";
+    if (Array.isArray(limpo.ligar)) limpo.ligar = limpo.ligar.map(l => l.chave + " linha " + l._row + " → " + l.idMov);
     const corta = s => s.length > 40000 ? s.slice(0, 40000) + "…" : s;
     sheet.appendRow([
       Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"),
@@ -963,6 +1092,7 @@ function executarAccao(action, data) {
         fracao_numero: data.fracao_numero, data: data.data || hoje(), valor: m.valor,
         mes: m.mes, ano: m.ano, metodo: data.metodo || "",
         referencia: data.referencia || "", observacoes: data.observacoes || "",
+        canal: canalNovo(data),
       })));
       return { ok: true, row, count: meses.length };
     }
@@ -977,7 +1107,7 @@ function executarAccao(action, data) {
 
     case "edit_pagamento_quota": {
       if (data.mes !== undefined) exigir(data.mes >= 1 && data.mes <= 12, "Mês inválido");
-      const row = editar("QUOTAS", data, ["fracao_numero", "data", "valor", "mes", "ano", "metodo", "referencia", "observacoes"], validarAberto(data));
+      const row = editar("QUOTAS", data, ["fracao_numero", "data", "valor", "mes", "ano", "metodo", "referencia", "observacoes", "canal", "idMov", "notaRec", "dataExtrato", "descExtrato", "valorMov"], validarAberto(data));
       return { ok: true, row };
     }
 
@@ -1063,6 +1193,7 @@ function executarAccao(action, data) {
         contribuicao_titulo: c.titulo, contribuicao_id: c.id,
         fracao_numero: data.fracao_numero, data: data.data || hoje(), valor: data.valor || 0,
         metodo: data.metodo || "", referencia: data.referencia || "", observacoes: data.observacoes || "",
+        canal: canalNovo(data),
       }]);
       return { ok: true, row };
     }
@@ -1077,13 +1208,14 @@ function executarAccao(action, data) {
         contribuicao_titulo: c.titulo, contribuicao_id: c.id,
         fracao_numero: n, data: data.data || hoje(), valor: data.valor_por_fracao || 0,
         metodo: data.metodo || "", referencia: "", observacoes: "",
+        canal: canalNovo(data),
       })));
       return { ok: true, row, count: numeros.length };
     }
 
     case "edit_pagamento_contribuicao": {
       if (data.contribuicao_id !== undefined) data.contribuicao_titulo = contribPorId(data.contribuicao_id).titulo;
-      const row = editar("PGC", data, ["contribuicao_id", "contribuicao_titulo", "fracao_numero", "data", "valor", "metodo", "referencia", "observacoes"], validarAberto(data));
+      const row = editar("PGC", data, ["contribuicao_id", "contribuicao_titulo", "fracao_numero", "data", "valor", "metodo", "referencia", "observacoes", "canal", "idMov", "notaRec", "dataExtrato", "descExtrato", "valorMov"], validarAberto(data));
       return { ok: true, row };
     }
 
@@ -1099,12 +1231,13 @@ function executarAccao(action, data) {
         data: data.data, valor: data.valor, descricao: data.descricao, categoria: data.categoria || "Outros",
         fornecedor: data.fornecedor || "", numFatura: data.numFatura || "",
         pagoPor: data.pagoPor || "", observacoes: data.observacoes || "",
+        canal: data.canal ? normCanal(data.canal) : undefined,
       }]);
       return { ok: true, row };
     }
 
     case "edit_despesa":
-      return { ok: true, row: editar("DESPESAS", data, ["data", "valor", "descricao", "categoria", "fornecedor", "numFatura", "observacoes"], validarAberto(data)) };
+      return { ok: true, row: editar("DESPESAS", data, ["data", "valor", "descricao", "categoria", "fornecedor", "numFatura", "observacoes", "canal", "idMov", "notaRec", "dataExtrato", "descExtrato", "valorMov"], validarAberto(data)) };
 
     case "delete_despesa":
       return { ok: true, row: apagar("DESPESAS", data, validarAberto()) };
@@ -1128,6 +1261,83 @@ function executarAccao(action, data) {
       return { ok: true, row: apagar("AVISOS", data) };
 
     // ── GESTÃO: fecho de período, registo, cópias (G1, G3, G4) ──
+    // ── CONCILIAÇÃO: importar extracto (fase 2) ─────────────────
+    // movimentos = [{numDoc, dataMov, dataValor, pedido, numOper, descricao, valor, saldo, idAntigo}]
+    case "importar_extracto": {
+      const movs = data.movimentos || [];
+      exigir(movs.length > 0, "O ficheiro não tem movimentos");
+      movs.forEach(m => exigir(String(m.numDoc || "").trim(), "Há movimentos sem NUM. DOC."));
+      const sh = ensureExtractoSheet();
+      const existentes = {};
+      readExtracto().forEach(m => { existentes[m.numDoc] = true; });
+      const agora = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm");
+      const novos = movs.filter(m => !existentes[String(m.numDoc).trim()]);
+      if (novos.length) {
+        const linhas = novos.map(m => [String(m.numDoc).trim(), m.dataMov || "", m.dataValor || "", String(m.pedido || ""), String(m.numOper || ""),
+          m.descricao || "", Number(m.valor) || 0, m.saldo === null || m.saldo === undefined ? "" : Number(m.saldo), m.idAntigo || "", agora]);
+        const ini = nextEmptyRow(sh, 5);
+        sh.getRange(ini, 1, linhas.length, 5).setNumberFormat("@");
+        sh.getRange(ini, 1, linhas.length, EXT_COLS.length).setValues(linhas);
+      }
+      LOG.aba = ABA.EXT;
+      return { ok: true, novos: novos.length, repetidos: movs.length - novos.length };
+    }
+
+    // Propostas aceites (fase 3)
+    //   ligar: [{chave:"QUOTAS"|"PGC"|"DESPESAS", _row, _sig, idMov, dataExtrato, descExtrato, valorMov, canal, confianca, notaRec}]
+    //   criar: {QUOTAS:[{fracao_numero, data, valor, mes, ano, ...rec}], PGC:[{contribuicao_id, fracao_numero, data, valor, ...rec}], DESPESAS:[{data, valor, descricao, categoria, ...rec}]}
+    case "conciliar": {
+      const REC = ["idMov", "dataExtrato", "descExtrato", "valorMov", "canal", "confianca", "notaRec"];
+      const ligar = data.ligar || [], criar = data.criar || {};
+      exigir(ligar.length || Object.keys(criar).some(k => (criar[k] || []).length), "Nada para gravar");
+      // 1) verificar todas as linhas antes de escrever
+      const alvo = ligar.map(l => {
+        exigir(["QUOTAS", "PGC", "DESPESAS"].indexOf(l.chave) >= 0, "Tipo inválido");
+        exigir(String(l.idMov || "").trim(), "Falta o movimento");
+        const v = verificarLinha(l.chave, l._row, l._sig);
+        return { l, v };
+      });
+      alvo.forEach(({ l, v }) => {
+        const cols = resolverColunas(v.esq, v.sheet, true);
+        REC.forEach(k => { if (l[k] !== undefined && cols[k]) v.sheet.getRange(v.row, cols[k]).setValue(valorParaFolha(k, k === "canal" ? normCanal(l[k]) : l[k])); });
+      });
+      // 2) criar os registos em falta (já ligados ao movimento)
+      const q = criar.QUOTAS || [], pc = criar.PGC || [], de = criar.DESPESAS || [];
+      [...q, ...pc, ...de].forEach(x => exigirPeriodoAberto(String(x.data || "").slice(0, 7)));
+      q.forEach(x => exigir(x.fracao_numero && x.mes >= 1 && x.mes <= 12 && x.ano > 2000 && Number(x.valor) > 0, "Quota inválida"));
+      if (q.length) acrescentar("QUOTAS", q.map(x => Object.assign({ metodo: "Transferência", referencia: x.idMov, observacoes: "" }, x, { canal: "Banco" })));
+      if (pc.length) acrescentar("PGC", pc.map(x => {
+        const c = contribAberta(x.contribuicao_id);
+        return Object.assign({ metodo: "Transferência", referencia: x.idMov, observacoes: "" }, x, { contribuicao_titulo: c.titulo, canal: "Banco" });
+      }));
+      if (de.length) acrescentar("DESPESAS", de.map(x => Object.assign({ categoria: "Outros", fornecedor: "", numFatura: "", pagoPor: "", observacoes: "" }, x, { canal: "Banco" })));
+      LOG.aba = "Conciliação";
+      return { ok: true, ligados: alvo.length, criados: q.length + pc.length + de.length };
+    }
+
+    // mapa = {"EXT-20240919-002": "259282390", ...}
+    case "converter_ids_movimento": {
+      const mapa = data.mapa || {};
+      exigir(Object.keys(mapa).length > 0, "Nada para converter");
+      Object.keys(mapa).forEach(k => exigir(/^EXT-\d{8}-\d+$/.test(k) && String(mapa[k]).trim(), "Identificador inválido: " + k));
+      const res = {};
+      [[ABA.QUOTAS, 4], [ABA.PGC, 4], [ABA.DESPESAS, 4]].forEach(([aba, hdr]) => {
+        res[aba] = trocarNaColuna(aba, hdr, "id_movimento", mapa) + trocarNaColuna(aba, hdr, "referencia_doc", mapa);
+      });
+      // Guarda o id antigo na aba Extracto
+      const sh = SS.getSheetByName(ABA.EXT);
+      if (sh && sh.getLastRow() >= 5) {
+        const inv = {}; Object.keys(mapa).forEach(k => { inv[String(mapa[k]).trim()] = k; });
+        const n = sh.getLastRow() - 4;
+        const docs = sh.getRange(5, 1, n, 1).getValues(), ant = sh.getRange(5, 9, n, 1).getValues();
+        let mud = false;
+        for (let i = 0; i < n; i++) { const d = String(docs[i][0]).trim(); if (inv[d] && !ant[i][0]) { ant[i][0] = inv[d]; mud = true; } }
+        if (mud) sh.getRange(5, 9, n, 1).setValues(ant);
+      }
+      LOG.antes = { convertidos: Object.keys(mapa).length };
+      return { ok: true, linhas: res };
+    }
+
     case "set_fecho": {
       const ate = String(data.ate || "").trim();
       exigir(!ate || /^\d{4}-\d{2}$/.test(ate), "Mês inválido");

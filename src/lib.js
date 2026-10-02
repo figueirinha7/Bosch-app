@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════════
    Constantes, formatação, API e cálculos partilhados
 ════════════════════════════════════════════════════════════════ */
-export const APP_VERSAO = "v7.3";
+export const APP_VERSAO = "v7.8";
 export const API_URL    = "https://script.google.com/macros/s/AKfycbyvN52wjCWtvSOMrRqszVtOZC1OfSnfciOSN1iANp-vH-Ap6wIgchYlUuIu9SUyQgUsVw/exec";
 
 export const MESES   = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -25,6 +25,10 @@ export const fmtDateCurta = (d) => d ? new Date(d+"T12:00:00").toLocaleDateStrin
 export const fmtDateNum = (d) => d ? new Date(d+"T12:00:00").toLocaleDateString("pt-PT") : "";
 export const fmtDateTime = (d) => d ? new Date(d).toLocaleString("pt-PT",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}) : "";
 export const nomeApt = (f) => f ? (f.prop_nome||f.proprietario||"") : "";
+// Responsável pelo pagamento: o inquilino, se existir; senão, o proprietário
+export const nomeResp = (f) => f ? (f.inq_nome||nomeApt(f)) : "";
+// O outro nome (para mostrar em pequeno junto do responsável): o proprietário quando há inquilino
+export const nomeOutro = (f) => f && f.inq_nome ? nomeApt(f) : "";
 export const lblMes  = (m) => `${MESES_S[m.mes-1]} ${m.ano}`;
 
 /* ── STORAGE ── */
@@ -97,7 +101,7 @@ export function msgLembrete(f, nome, qi, contribs, config) {
 // Recibo por WhatsApp (D1) — rec vem de reciboNovo / reciboDePagamento
 export function msgRecibo(rec, nome, config) {
   return [`🏢 *${config.predio}*`, "", `*Recibo de pagamento n.º ${rec.numero}*`, "",
-    `Caro(a) ${nome||nomeApt(rec.f)},`, "",
+    `Caro(a) ${nome||nomeResp(rec.f)},`, "",
     `Confirmamos a recepção de *${fmtKz(rec.total)}* do apartamento *${rec.f?.numero}*, pago a ${fmtDate(rec.data)}${rec.metodo?` (${rec.metodo})`:""}, referente a:`,
     ...rec.meses.map(m=>`• Quota ${MESES[m.mes-1]} ${m.ano}: ${fmtKz(m.valor)}`),
     "", "Obrigado.", "", `${config.gestorNome||"A gestão"}`].join("\n");
@@ -347,3 +351,276 @@ export function andarDe(f) {
   return null;
 }
 export const nomeAndar = (n) => n===null ? "Outros" : n===0 ? "R/C" : `${n}º`;
+
+/* ═══════════════════════════════════════════════════════════════
+   CONCILIAÇÃO COM O BANCO (fase 1)
+   Colunas lidas pelo Apps Script (só gestor): idMov, dataExtrato, descExtrato,
+   valorMov, canal, confianca, notaRec.
+═══════════════════════════════════════════════════════════════ */
+export const CANAIS = ["Banco","Numerário","Gestor anterior","Isento","Acerto"];
+const FORA_BANCO = ["Numerário","Gestor anterior","Acerto"];
+// Estado de um registo (quota, pagamento de contribuição ou despesa)
+//   conciliado  — ligado a um movimento do extracto
+//   isento      — isenção (não mexe em dinheiro)
+//   fora        — dinheiro que não passou pelo banco (numerário, gestor anterior, acerto)
+//   porConciliar— o resto
+export function estadoConc(r) {
+  if (!r) return { k:"porConciliar" };
+  if (r.metodo === "Isento" || r.canal === "Isento") return { k:"isento", label:"Isento", tag:"tag-grey" };
+  if (r.idMov) return { k:"conciliado", label: r.canal==="Gestor anterior" ? "Banco · gestor anterior" : "No banco", tag:"tag-green" };
+  if (FORA_BANCO.includes(r.canal)) return { k:"fora", label: r.canal, tag:"tag-blue" };
+  return { k:"porConciliar", label:"Por conciliar", tag:"tag-amber" };
+}
+// A folha tem as colunas de reconciliação? (sem elas, os sinais ficam escondidos)
+export const temConciliacao = (appData) =>
+  [appData.pagamentosQuota, appData.pagamentosContribuicao, appData.despesas].some(l => (l||[]).some(r => r.idMov || r.canal));
+
+// Saldo da app explicado pelos movimentos do banco, até ao fim de um mês (aaaa-mm; por omissão, tudo):
+//   saldo da app = movimentos do banco ligados + entradas sem movimento − despesas sem movimento + diferenças
+// "banco" é o saldo que o extracto deve mostrar nessa data (a comparar com o banco).
+// "diferenças" = registos que somam mais (ou menos) do que o movimento a que estão ligados
+// (ex.: quotas pagas ao gestor anterior, todas ligadas a um único depósito).
+export function resumoConciliacao(appData, ate) {
+  const dentro = (d) => !ate || (KEY_RE.test(d||"") ? d.slice(0,7) <= ate : true);
+  const movs = {};      // id → { data, vm (valor_movimento_kz da 1.ª linha que o tenha, com sinal), soma dos registos, n, gestorAnterior }
+  // O valor e a data do movimento vêm do extracto importado sempre que possível (a linha pode não os ter,
+  // ex.: NUM. DOC. escrito à mão); sem extracto, usa valor_movimento_kz; sem esse, assume a soma dos registos.
+  const ext = new Map();
+  (appData.extracto||[]).forEach(m => { ext.set(String(m.numDoc), m); if (m.idAntigo) ext.set(String(m.idAntigo), m); });
+  const r = { app:0, banco:0, entradasSem:0, despesasSem:0, nEntradasSem:0, nDespesasSem:0, cont:{conciliado:0,isento:0,fora:0,porConciliar:0} };
+  const passa = (x, sinal, dataCaixa) => {
+    const e = estadoConc(x); r.cont[e.k]++;
+    if (e.k === "isento" || !dentro(dataCaixa)) return;
+    const v = sinal * (x.valor||0);
+    r.app += v;
+    if (x.idMov) {
+      const m = (movs[x.idMov] ||= { data: x.dataExtrato || dataCaixa, vm: null, soma: 0, n: 0, gestorAnterior: false });
+      if (m.vm == null && x.valorMov != null && x.valorMov !== "") m.vm = sinal * Math.abs(+x.valorMov);
+      m.soma += v; m.n++;
+      if (x.canal === "Gestor anterior") m.gestorAnterior = true;
+    } else if (sinal > 0) { r.entradasSem += v; r.nEntradasSem++; }
+    else { r.despesasSem += -v; r.nDespesasSem++; }
+  };
+  (appData.pagamentosQuota||[]).forEach(p => passa(p, 1, mesCaixaQuota(p)+"-01"));
+  (appData.pagamentosContribuicao||[]).forEach(p => passa(p, 1, p.data));
+  (appData.despesas||[]).forEach(d => passa(d, -1, d.data));
+  Object.entries(movs).forEach(([id, m]) => {
+    const e = ext.get(String(id));
+    if (e) { m.valor = e.valor; m.data = e.dataMov || m.data; m.doExtracto = true; }
+    else m.valor = m.vm != null ? m.vm : m.soma;
+  });
+  const lista = Object.entries(movs).filter(([,m]) => dentro(m.data));
+  r.banco = lista.reduce((s,[,m]) => s + m.valor, 0);
+  r.nMovs = lista.length;
+  r.difs = lista.filter(([,m]) => Math.abs(m.soma - m.valor) > 0.5).map(([id,m]) => ({ id, ...m, dif: m.soma - m.valor }));
+  r.dif = r.difs.reduce((s,x) => s + x.dif, 0);
+  return r;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CONCILIAÇÃO — fase 2: extracto bancário
+═══════════════════════════════════════════════════════════════ */
+// Lê as linhas de um extracto .xlsx (formato "Movimentos" do banco: cabeçalho
+// DATA MOV. | DATA VALOR | PEDIDO NUM. | NUM. OPER. | NUM. DOC. | DESCRIÇÃO | VALOR | SALDO | MOEDA).
+// rows = array de linhas (cada uma um array de células). Devolve { movimentos, conta, erro }.
+const semAcentos = s => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
+const dataIso = v => {
+  if (v instanceof Date) return `${v.getUTCFullYear()}-${pad2(v.getUTCMonth()+1)}-${pad2(v.getUTCDate())}`;
+  const s = String(v ?? "").trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/); if (m) return `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
+  return "";
+};
+const numero = v => typeof v === "number" ? v : parseFloat(String(v ?? "").replace(/\s/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".")) || 0;
+export function lerExtracto(rows) {
+  const iH = rows.findIndex(r => (r||[]).some(c => semAcentos(c) === "NUM. DOC.") && (r||[]).some(c => semAcentos(c) === "DESCRICAO"));
+  if (iH < 0) return { erro: "Não encontrei o cabeçalho do extracto (NUM. DOC., DESCRIÇÃO, VALOR…). Use o ficheiro \"Movimentos\" exportado do banco em .xlsx." };
+  const h = rows[iH].map(semAcentos), col = n => h.indexOf(n);
+  const c = { dataMov: col("DATA MOV."), dataValor: col("DATA VALOR"), pedido: col("PEDIDO NUM."), numOper: col("NUM. OPER."),
+    numDoc: col("NUM. DOC."), descricao: col("DESCRICAO"), valor: col("VALOR"), saldo: col("SALDO"), moeda: col("MOEDA") };
+  if ([c.dataMov, c.numDoc, c.descricao, c.valor].some(i => i < 0)) return { erro: "Faltam colunas no extracto (DATA MOV., NUM. DOC., DESCRIÇÃO e VALOR são obrigatórias)." };
+  const conta = rows.slice(0, iH).map(r => (r||[]).filter(x => x != null).join(" ")).find(t => /conta/i.test(t)) || "";
+  const movimentos = [];
+  rows.slice(iH + 1).forEach(r => {
+    if (!r || r.every(x => x == null || x === "")) return;
+    const numDoc = String(r[c.numDoc] ?? "").trim();
+    if (!numDoc) return;
+    movimentos.push({ ordem: movimentos.length, numDoc, dataMov: dataIso(r[c.dataMov]), dataValor: c.dataValor >= 0 ? dataIso(r[c.dataValor]) : "",
+      pedido: c.pedido >= 0 ? String(r[c.pedido] ?? "").trim() : "", numOper: c.numOper >= 0 ? String(r[c.numOper] ?? "").trim() : "",
+      descricao: String(r[c.descricao] ?? "").trim(), valor: numero(r[c.valor]), saldo: c.saldo >= 0 && r[c.saldo] != null && r[c.saldo] !== "" ? numero(r[c.saldo]) : null });
+  });
+  const docs = new Set(movimentos.map(m => m.numDoc));
+  if (docs.size !== movimentos.length) return { erro: "O extracto tem NUM. DOC. repetidos — não consigo identificar os movimentos com segurança." };
+  return { movimentos, conta };
+}
+
+// Identificadores antigos (EXT-AAAAMMDD-NNN = data + posição no ficheiro original) → NUM. DOC.
+// Só converte quando a data do id coincide com a do movimento nessa posição.
+export function mapaIdsAntigos(appData, movimentos) {
+  const ids = new Set();
+  [appData.pagamentosQuota, appData.pagamentosContribuicao, appData.despesas].forEach(l => (l||[]).forEach(r => { if (/^EXT-\d{8}-\d+$/.test(r.idMov||"")) ids.add(r.idMov); }));
+  const mapa = {}, falham = [];
+  ids.forEach(id => {
+    const [, d, n] = id.match(/^EXT-(\d{8})-(\d+)$/);
+    const m = movimentos[+n];
+    if (m && m.dataMov.replace(/-/g, "") === d) mapa[id] = m.numDoc; else falham.push(id);
+  });
+  return { mapa, falham, total: ids.size };
+}
+
+// Saldo do extracto no fim de um mês (aaaa-mm): saldo do último movimento até lá
+export function saldoExtracto(extracto, ate) {
+  const l = (extracto||[]).filter(m => m.saldo != null && (!ate || (m.dataMov||"").slice(0,7) <= ate));
+  if (!l.length) return null;
+  const u = l.reduce((a, b) => ((b.dataMov||"") >= (a.dataMov||"") ? b : a));   // a ordem do ficheiro desempata
+  return { saldo: u.saldo, data: u.dataMov };
+}
+
+// Movimentos do extracto sem nenhum registo da app ligado
+export function movimentosPorIdentificar(appData) {
+  const lig = new Set();
+  [appData.pagamentosQuota, appData.pagamentosContribuicao, appData.despesas].forEach(l => (l||[]).forEach(r => { if (r.idMov) lig.add(String(r.idMov)); }));
+  return (appData.extracto||[]).filter(m => !lig.has(String(m.numDoc)) && !(m.idAntigo && lig.has(m.idAntigo)));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CONCILIAÇÃO — fase 3: livro de NIBs e propostas automáticas
+═══════════════════════════════════════════════════════════════ */
+// Chave de quem paga: o NIB (21 dígitos) se vier na descrição; senão o nome do ordenante.
+// Descrições genéricas ("Transferência") não dão chave.
+const PREFIXOS = /^(TC STC DE|TRF KWIK DE|TRANSF\.? PELO NIB|TRANSFERENCIA DE|TRANSF\.? DE|TC DE|TRF DE)\s+/;
+export function chavePagador(desc) {
+  const s = semAcentos(desc);
+  const nib = s.match(/\d{21}/);
+  if (nib) return nib[0];
+  const nome = s.replace(PREFIXOS, "").replace(/[^A-Z ]/g, " ").replace(/\s+/g, " ").trim();
+  const pal = nome.split(" ").filter(p => p.length > 1);
+  if (pal.length < 2 || /^TRANSFERENCIA|^TRANSF |^PAGAMENTO|^CONDOMINIO/.test(nome)) return "";
+  return "NOME:" + pal.slice(0, 3).join(" ");
+}
+// Livro de NIBs: aprendido das ligações que já existem (movimento ↔ apartamento) e da aba "🔗 NIBs", se existir.
+// Devolve Map chave → [ids de apartamentos], ignorando chaves "genéricas" que apontam para muitos apartamentos.
+export function livroNibs(appData) {
+  const ext = new Map(); (appData.extracto||[]).forEach(m => { ext.set(String(m.numDoc), m); if (m.idAntigo) ext.set(m.idAntigo, m); });
+  const conta = new Map();
+  const junta = (chave, fId) => { if (!chave || !fId) return; if (!conta.has(chave)) conta.set(chave, new Set()); conta.get(chave).add(fId); };
+  [appData.pagamentosQuota, appData.pagamentosContribuicao].forEach(l => (l||[]).forEach(r => {
+    if (!r.idMov || r.canal === "Gestor anterior") return;
+    const m = ext.get(String(r.idMov));
+    junta(chavePagador(m ? m.descricao : r.descExtrato), r.fracaoId);
+  }));
+  const num2id = new Map((appData.fracoes||[]).map(f => [String(f.numero).trim(), f.id]));
+  (appData.nibs||[]).forEach(n => String(n.fracoes||"").split(/[,;/ ]+/).forEach(x => junta(n.chave, num2id.get(x.trim()))));
+  const livro = new Map();
+  conta.forEach((ids, k) => { if (ids.size <= 6) livro.set(k, [...ids]); });
+  return livro;
+}
+
+const diasEntre = (a, b) => Math.abs((new Date(a+"T12:00:00") - new Date(b+"T12:00:00")) / 864e5);
+// Subconjunto de registos cuja soma dá exactamente o valor (prefere os registados juntos e os mais próximos da data)
+function somaExacta(cands, valor, data) {
+  const v = Math.round(valor);
+  // 1) registos do mesmo dia (um pagamento de vários meses fica registado de uma vez)
+  const porDia = {}; cands.forEach(c => { (porDia[(c.r.data||"")+"|"+c.r.fracaoId] ||= []).push(c); });
+  const grupos = Object.values(porDia).filter(g => Math.round(g.reduce((s,c)=>s+c.r.valor,0)) === v)
+    .sort((a,b) => diasEntre(a[0].r.data,data) - diasEntre(b[0].r.data,data));
+  if (grupos.length) return grupos[0];
+  // 2) um só registo
+  const um = cands.filter(c => Math.round(c.r.valor) === v).sort((a,b) => diasEntre(a.r.data,data) - diasEntre(b.r.data,data));
+  if (um.length) return [um[0]];
+  // 3) combinação (limitada), dos registos mais antigos para os mais recentes
+  const l = [...cands].sort((a,b) => (a.r.ano||0)-(b.r.ano||0) || (a.r.mes||0)-(b.r.mes||0) || (a.r.data||"").localeCompare(b.r.data||"")).slice(0, 18);
+  let passos = 0, res = null;
+  const rec = (i, soma, esc) => {
+    if (res || ++passos > 40000) return;
+    if (soma === v && esc.length) { res = [...esc]; return; }
+    if (i >= l.length || soma > v) return;
+    esc.push(l[i]); rec(i+1, soma + Math.round(l[i].r.valor), esc); esc.pop();
+    rec(i+1, soma, esc);
+  };
+  rec(0, 0, []);
+  return res;
+}
+
+// Repartição de uma entrada por um apartamento: quotas em falta mais antigas, depois contribuições abertas em dívida,
+// depois quotas futuras (adiantamento, até 12 meses). Devolve null se não der certo ao kwanza.
+export function repartirEntrada(appData, fId, valor) {
+  const { pagamentosQuota, contribuicoes, pagamentosContribuicao, config } = appData;
+  const f = (appData.fracoes||[]).find(x => x.id === fId);
+  if (!f || inativa(f)) return null;
+  let resto = Math.round(valor);
+  const quotas = [], contribs = [];
+  if (!semQuota(f)) {
+    quotaInfo(fId, pagamentosQuota, config).mesesEmFalta.forEach(m => {
+      if (resto <= 0) return; const v = Math.min(resto, Math.round(m.emFalta)); quotas.push({ mes:m.mes, ano:m.ano, valor:v }); resto -= v; });
+  }
+  contribuicoes.filter(c => !contribFechada(c)).forEach(c => {
+    if (resto <= 0) return; const ci = contribInfo(c, f, pagamentosContribuicao);
+    if (ci.divida > 0) { const v = Math.min(resto, Math.round(ci.divida)); contribs.push({ c, valor:v }); resto -= v; } });
+  if (resto > 0 && !semQuota(f)) {
+    const now = new Date(); let y = now.getFullYear(), m = now.getMonth()+2; if (m > 12) { m = 1; y++; }
+    for (let i = 0; i < 12 && resto > 0; i++) {
+      const ja = quotas.some(q => q.mes===m && q.ano===y) || pagamentosQuota.some(p => p.fracaoId===fId && p.mes===m && p.ano===y);
+      if (!ja) { const q = quotaDoMes(config, y, m); const v = Math.min(resto, q); quotas.push({ mes:m, ano:y, valor:v }); resto -= v; }
+      m++; if (m > 12) { m = 1; y++; }
+    }
+  }
+  return resto === 0 && (quotas.length || contribs.length) ? { quotas, contribs } : null;
+}
+
+// Propostas para os movimentos do extracto ainda sem ligação.
+//   tipo "ligar": registos da app já existentes (sem movimento) que somam o valor
+//   tipo "criar": entrada de um apartamento conhecido sem registos → repartir por quotas/contribuições
+//   tipo "despesa": saída → ligar a uma despesa sem movimento com o mesmo valor, ou criar uma nova
+//   tipo "manual": não há proposta segura (o gestor escolhe o apartamento)
+export function propostasConciliacao(appData, { dias = 10 } = {}) {
+  const livro = livroNibs(appData);
+  const livres = (lista, chave) => (lista||[]).filter(r => !r.idMov && r.metodo !== "Isento" && !["Isento","Numerário","Gestor anterior","Acerto"].includes(r.canal))
+    .map(r => ({ chave, r }));
+  const candEnt = [...livres(appData.pagamentosQuota, "QUOTAS"), ...livres(appData.pagamentosContribuicao, "PGC")];
+  const candDesp = livres(appData.despesas, "DESPESAS");
+  const usados = new Set();
+  // Estado "virtual": o que as propostas anteriores já criaram conta para as seguintes (não repetir meses)
+  const virt = { ...appData, pagamentosQuota:[...(appData.pagamentosQuota||[])], pagamentosContribuicao:[...(appData.pagamentosContribuicao||[])] };
+  return movimentosPorIdentificar(appData).sort((a,b) => (a.dataMov||"").localeCompare(b.dataMov||"")).map(m => {
+    const data = m.dataValor || m.dataMov;
+    const perto = c => !usados.has(c.chave+c.r._row) && c.r.data && diasEntre(c.r.data, data) <= dias;
+    if (m.valor < 0) {
+      const ds = somaExacta(candDesp.filter(perto).map(c => ({ ...c, r:{ ...c.r, fracaoId:"" } })), -m.valor, data);
+      if (ds) { const orig = ds.map(x => candDesp.find(c => c.r._row === x.r._row)); orig.forEach(c => usados.add(c.chave+c.r._row));
+        return { m, tipo:"despesa", ligar:orig, confianca: orig.every(c => diasEntre(c.r.data,data) <= 3) ? "Alta" : "Média" }; }
+      return { m, tipo:"despesa", criarDespesa:{ data, valor:-m.valor, descricao:m.descricao }, confianca:"Média" };
+    }
+    const chave = chavePagador(m.descricao);
+    const apts = chave && livro.get(chave) || null;
+    const cands = candEnt.filter(c => perto(c) && (!apts || apts.includes(c.r.fracaoId)));
+    const sel = somaExacta(cands, m.valor, data);
+    if (sel && (apts || sel.every(c => c.r.fracaoId === sel[0].r.fracaoId))) {
+      sel.forEach(c => usados.add(c.chave+c.r._row));
+      const perfeito = apts && sel.every(c => diasEntre(c.r.data, data) <= 3);
+      return { m, tipo:"ligar", ligar:sel, apts, confianca: perfeito ? (chave.startsWith("NOME:") ? "Alta" : "Confirmado") : "Média" };
+    }
+    if (apts && apts.length === 1) {
+      const rep = repartirEntrada(virt, apts[0], m.valor);
+      if (rep) {
+        rep.quotas.forEach(q => virt.pagamentosQuota.push({ fracaoId:apts[0], mes:q.mes, ano:q.ano, valor:q.valor, metodo:"Transferência", data }));
+        rep.contribs.forEach(x => virt.pagamentosContribuicao.push({ contribuicaoId:x.c.id, fracaoId:apts[0], valor:x.valor, metodo:"Transferência", data }));
+        return { m, tipo:"criar", fId:apts[0], ...rep, apts, confianca: chave.startsWith("NOME:") ? "Média" : "Alta" };
+      }
+    }
+    return { m, tipo:"manual", apts, chave };
+  });
+}
+
+// Proposta para um movimento de entrada quando o gestor escolhe o apartamento à mão:
+// primeiro tenta ligar a registos sem movimento desse apartamento; senão reparte (criar).
+export function propostaParaApt(appData, m, fId, { dias = 10 } = {}) {
+  const data = m.dataValor || m.dataMov;
+  const cands = [["QUOTAS", appData.pagamentosQuota], ["PGC", appData.pagamentosContribuicao]].flatMap(([chave, l]) =>
+    (l||[]).filter(r => r.fracaoId === fId && !r.idMov && r.metodo !== "Isento" && !["Isento","Numerário","Gestor anterior","Acerto"].includes(r.canal) && r.data && diasEntre(r.data, data) <= dias)
+      .map(r => ({ chave, r })));
+  const sel = somaExacta(cands, m.valor, data);
+  if (sel) return { m, tipo:"ligar", ligar:sel, apts:[fId], confianca:"Alta", manual:true };
+  const rep = repartirEntrada(appData, fId, m.valor);
+  return rep ? { m, tipo:"criar", fId, ...rep, apts:[fId], confianca:"Alta", manual:true } : { m, tipo:"manual", apts:[fId], semReparticao:true };
+}
