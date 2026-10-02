@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════════
    Constantes, formatação, API e cálculos partilhados
 ════════════════════════════════════════════════════════════════ */
-export const APP_VERSAO = "v7.1";
+export const APP_VERSAO = "v7.2";
 export const API_URL    = "https://script.google.com/macros/s/AKfycbyvN52wjCWtvSOMrRqszVtOZC1OfSnfciOSN1iANp-vH-Ap6wIgchYlUuIu9SUyQgUsVw/exec";
 
 export const MESES   = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
