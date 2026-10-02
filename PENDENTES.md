@@ -3,6 +3,20 @@
 Lista de trabalho da app (Vercel, endereço oficial: bosch-app.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
+## 🧪 v7.7 (branch `beta`, ainda não no `main`) — conciliação com o banco, fase 3
+
+**Mexe no Apps Script:** colar o novo `Code.gs` e publicar *Nova versão*.
+
+- *Gestão → Conciliação → Propor correspondências*: para cada movimento do extracto ainda sem ligação, a app propõe:
+  - **Ligar** a pagamentos ou despesas já registados sem movimento, que somem o valor ao kwanza (registos do mesmo dia primeiro, até 10 dias de diferença);
+  - **Criar** os registos em falta quando sabe de que apartamento é: quotas em falta mais antigas, depois contribuições abertas, depois adiantamento de quotas;
+  - **Despesas**: ligar a despesas sem movimento (também saídas divididas em várias despesas) ou criar uma nova (com categoria);
+  - **Manual**: quando não sabe quem pagou (ex.: "Transferência" sem NIB), o gestor escolhe o apartamento e a app refaz a proposta.
+- Confiança: *Confirmado* (NIB conhecido, ≤3 dias), *Alta*, *Média*. Vêm marcadas só as de confiança alta; nada é gravado até "Gravar seleccionadas".
+- **Livro de NIBs aprendido** das ligações já feitas (NIB, ou nome do ordenante quando não há NIB; grupos como 0/6/8/9 incluídos). Lê também a aba **"🔗 NIBs"** (cabeçalho na linha 4: `chave` = NIB de 21 dígitos ou `NOME:…`, `fracoes` = ex. `6,8,9`, `nome`), se existir — para completar com o `Etapa2_Livro_de_IBANs_v3.xlsx`.
+- Apps Script: acção `conciliar` grava tudo de uma vez (verifica todas as linhas antes; registos novos respeitam o fecho de período e só em contribuições abertas).
+- Testado com a folha beta e o extracto: 44 de 45 ligações propostas correctas; a outra (movimento sem NIB conhecido) ficou como *Média*, desmarcada.
+
 ## 🧪 v7.6 (branch `beta`, ainda não no `main`) — conciliação com o banco, fase 2
 
 **Mexe no Apps Script:** colar o novo `Code.gs` e publicar *Nova versão*.
@@ -182,7 +196,7 @@ Próximos sugeridos: 1) A5, G5 (pequenos) · 2) C5, D2, F1 · 3) B3, E1–E4 · 
 - **A5. Multa por atraso** (`multa_atraso_pct`): calcular e mostrar separada da quota.
 - **A8. Conciliação com o banco — fases 2 e 3** (fase 1 na v7.5). Decisões tomadas: chave dos movimentos = `NUM. DOC.` do extracto (o `NUM. OPER.` não é único); livro de NIBs importado na fase 3 (de `Etapa2_Livro_de_IBANs_v3.xlsx`); canal com lista fixa; fracção 0 mantém os "recebimentos não identificados".
   - ✅ **Fase 2 (feita na v7.6):** importar o extracto (.xlsx "Movimentos", cabeçalho na linha 7) para uma aba "🏦 Extracto" sem duplicar; converter os `id_movimento` antigos (`EXT-AAAAMMDD-NNN`) para `NUM. DOC.`; lista de movimentos por identificar; comparação com o SALDO do extracto.
-  - **Fase 3 (~25–30% da v7):** aba "🔗 NIBs" (NIB/nome → apartamento ou grupo: 0/6/8/9, 4/5, 24/25, 26/27, 34/35) que a app aprende; propostas de correspondência (ligar a registos existentes, criar em falta, mostrar registos sem movimento), também para despesas.
+  - ✅ **Fase 3 (feita na v7.7):** aba "🔗 NIBs" (NIB/nome → apartamento ou grupo: 0/6/8/9, 4/5, 24/25, 26/27, 34/35) que a app aprende; propostas de correspondência (ligar a registos existentes, criar em falta, mostrar registos sem movimento), também para despesas.
 - **A7. Histórico do apartamento**: registar entradas e saídas de inquilinos (e mudanças de proprietário) com datas, e saber quem era o responsável em cada mês (para recibos, extractos e dívidas antigas). Por desenhar.
 - **A6. Data real da última alteração no cabeçalho público**: hoje "Actualizado …" mostra a hora da leitura (o script devolve `new Date()` em cada pedido), por isso aparece sempre a data do dia. Passar a mostrar quando a folha foi alterada pela última vez (data de modificação do ficheiro no Drive, inclui edições à mão) com o texto "Dados de …"; sem ligação continua "Sem ligação". Mexe no `Code.gs` (nova versão a publicar) e no cabeçalho; ~0,1–0,3 s a mais por leitura. Estimativa: ~3–4% da v7.
 

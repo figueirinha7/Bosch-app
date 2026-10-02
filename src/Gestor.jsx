@@ -5,7 +5,8 @@ import { MESES, MESES_S, CATS, AVISO_TIPOS, METODOS, ESTADOS_CONTRIB, today, cha
   quotaInfo, estadoMes, nivelAtraso, contribInfo, contribFechada, ordenarContribs, metaContrib, situacaoApt, intervaloMeses, alocar, resumoMeses,
   fluxoMensal, contaMes, serieMeses, cobrancaMes, rascunhoGet, rascunhoSet, msgRecibo, nomeResp, nomeOutro,
   inativa, semQuota, quotaDoMes, quotaAtual, historicoQuota, mesCaixaQuota, fmtDateTime,
-  CANAIS, estadoConc, temConciliacao, resumoConciliacao, lerExtracto, mapaIdsAntigos, saldoExtracto, movimentosPorIdentificar } from "./lib.js";
+  CANAIS, estadoConc, temConciliacao, resumoConciliacao, lerExtracto, mapaIdsAntigos, saldoExtracto, movimentosPorIdentificar,
+  propostasConciliacao, propostaParaApt } from "./lib.js";
 import { Icon, WaSvg, Modal, FG, CheckRow, Warn, Info, ModalBtns, RowActions, MesSelect, AnoSelect, Segmented,
   MesNav, Menu, AptCombo, ConfirmModal, Toast } from "./ui.jsx";
 import { AvisoCard } from "./Publico.jsx";
@@ -150,7 +151,8 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
   const [kpiDet,setKpiDet]=useState(null);   // A3: "cobranca" | "saldo" | "despesas" (do mês do painel)
   const [recibo,setRecibo]=useState(null);
   const [gst,setGst]=useState({});
-  const [impExt,setImpExt]=useState(null);   // pré-visualização da importação do extracto (fase 2)   // separador Gestão: {copias, ultima, automatica, registo, erro, carregando}
+  const [impExt,setImpExt]=useState(null);   // pré-visualização da importação do extracto (fase 2)
+  const [props,setProps]=useState(null);     // propostas de conciliação (fase 3): [{...proposta, sel}]   // separador Gestão: {copias, ultima, automatica, registo, erro, carregando}
   const [fecho,setFecho]=useState(()=>{ const d=new Date(anoAtual, mesAtual-2, 1); return {ano:d.getFullYear(), mes:d.getMonth()+1}; });
 
   const { config, fracoes, pagamentosQuota, contribuicoes, pagamentosContribuicao, despesas, avisos=[] } = appData;
@@ -1219,6 +1221,81 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
                     + entradas sem movimento − despesas sem movimento
                     + diferenças em movimentos partilhados
   ═══════════════════════════════════════════════════════════════ */
+  /* Propostas de conciliação (fase 3) — o gestor revê, escolhe e grava */
+  function Propostas() {
+    const apNum = id => aptById(id)?.numero || "?";
+    // Meses sem repetidos (um mês pago em duas partes aparece uma vez)
+    const resumoMeses2 = qs => resumoMeses([...new Map(qs.map(q=>[q.ano*100+q.mes,{mes:q.mes, ano:q.ano}])).values()]);
+    const descLigar = p => {
+      const ds = p.ligar.filter(x=>x.chave==="DESPESAS").map(x=>x.r);
+      if (ds.length) return ds.map(d=>`Despesa “${d.descricao}” de ${fmtDateCurta(d.data)} (${fmtNum(d.valor)})`).join(" + ");
+      const porApt = {};
+      p.ligar.forEach(x => { const a = apNum(x.r.fracaoId); (porApt[a] ||= { q:[], c:[] })[x.chave==="QUOTAS"?"q":"c"].push(x.r); });
+      return Object.entries(porApt).map(([a,{q,c}]) => `${a}: ${[q.length&&`Quotas ${resumoMeses2(q)}`, ...c.map(r=>contribById(r.contribuicaoId)?.titulo||"Contribuição")].filter(Boolean).join(", ")}`).join(" · ");
+    };
+    const descCriar = p => `${apNum(p.fId)} · ${[p.quotas.length&&`Quotas ${resumoMeses2(p.quotas)}`, ...p.contribs.map(x=>`${x.c.titulo} ${fmtNum(x.valor)}`)].filter(Boolean).join(" · ")}`;
+    const set = (i, patch) => setProps(ps => ps.map((p,j)=> j===i ? {...p, ...patch} : p));
+    const escolherApt = (i, num) => { const f = aptByNum(num); if (!f) return; const p = props[i];
+      setProps(ps => ps.map((x,j)=> j===i ? {...propostaParaApt(appData, p.m, f.id), sel:true, escolhido:num} : x)); };
+    const sel = props.filter(p=>p.sel && p.tipo!=="manual");
+    const rec = (p, conf) => ({ idMov:p.m.numDoc, dataExtrato:p.m.dataMov, descExtrato:p.m.descricao, valorMov:Math.abs(p.m.valor), canal:"Banco", confianca:conf||p.confianca,
+      notaRec: p.manual ? "Apartamento escolhido pelo gestor (app)" : "Proposta automática da app" });
+    const gravar = async ()=>{
+      const ligar = [], criar = { QUOTAS:[], PGC:[], DESPESAS:[] };
+      sel.forEach(p => {
+        const rc = rec(p);
+        if (p.ligar) p.ligar.forEach(x => ligar.push({ chave:x.chave, _row:x.r._row, _sig:x.r._sig, ...rc }));
+        else if (p.tipo==="criar") {
+          const num = apNum(p.fId), data = p.m.dataValor || p.m.dataMov;
+          p.quotas.forEach(q => criar.QUOTAS.push({ fracao_numero:num, data, valor:q.valor, mes:q.mes, ano:q.ano, ...rc }));
+          p.contribs.forEach(x => criar.PGC.push({ contribuicao_id:x.c.id, fracao_numero:num, data, valor:x.valor, ...rc }));
+        } else if (p.criarDespesa) criar.DESPESAS.push({ data:p.criarDespesa.data, valor:p.criarDespesa.valor, descricao:p.criarDespesa.descricao, categoria:p.categoria||"Outros", ...rc });
+      });
+      setSaving(true);
+      try {
+        const r = await apiPost(apiUrl, "conciliar", { ligar, criar }, token);
+        setSaving(false); setProps(null);
+        showToast({ ok:true, msg:`Conciliação gravada: ${r.ligados} registos ligados${r.criados?`, ${r.criados} criados`:""}` });
+        onReload();
+      } catch(e) { setSaving(false); if (e.code==="AUTH") return onExpired(); showToast({ ok:false, msg:e.message }); }
+    };
+    const confTag = c => <span className={`tag ${c==="Confirmado"||c==="Alta"?"tag-green":"tag-amber"}`}>{c}</span>;
+    return <div style={{marginTop:12,display:"flex",flexDirection:"column",gap:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        <b style={{fontSize:15}}>Propostas ({props.length})</b>
+        <span style={{display:"flex",gap:8}}>
+          <button className="btn btn-ghost btn-sm" onClick={()=>setProps(null)}>Cancelar</button>
+          <button className="btn btn-red btn-sm" disabled={!sel.length||saving} onClick={gravar}>{saving?<span className="spinner"/>:<Icon n="check" s={15}/>}Gravar seleccionadas ({sel.length})</button>
+        </span>
+      </div>
+      <div className="muted" style={{fontSize:12}}>Vêm marcadas as de confiança alta. Reveja as de confiança média antes de as marcar. Nada é gravado até carregar em "Gravar".</div>
+      {props.map((p,i)=>(
+        <div key={p.m.numDoc} style={{display:"grid",gridTemplateColumns:"28px minmax(0,1fr) auto",gap:10,alignItems:"start",padding:"8px 10px",border:"1px solid var(--line)",borderRadius:10,background:p.sel?"var(--surface-2)":"#fff"}}>
+          <input type="checkbox" aria-label={`Aceitar proposta para ${p.m.descricao}`} checked={!!p.sel} disabled={p.tipo==="manual"} onChange={e=>set(i,{sel:e.target.checked})} style={{width:20,height:20,marginTop:2,accentColor:"var(--brand)"}}/>
+          <div style={{display:"flex",flexDirection:"column",gap:3,minWidth:0}}>
+            <span style={{fontSize:14,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.m.descricao||"(sem descrição)"}</span>
+            <span className="muted" style={{fontSize:12}}>{fmtDate(p.m.dataMov)} · NUM. DOC. {p.m.numDoc}</span>
+            <span style={{fontSize:13}}>
+              {p.tipo==="ligar"&&<>Ligar a: <b>{descLigar(p)}</b></>}
+              {p.tipo==="criar"&&<>Criar: <b>{descCriar(p)}</b></>}
+              {p.tipo==="despesa"&&p.ligar&&<>Ligar a: <b>{descLigar(p)}</b></>}
+              {p.tipo==="despesa"&&p.criarDespesa&&<span style={{display:"inline-flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>Criar despesa nova, categoria
+                <select className="input" style={{width:"auto",minHeight:32,padding:"2px 8px"}} value={p.categoria||"Outros"} onChange={e=>set(i,{categoria:e.target.value})}>{catsDesp.map(c=><option key={c}>{c}</option>)}</select></span>}
+              {p.tipo==="manual"&&<span style={{display:"inline-flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+                {p.semReparticao?<span style={{color:"var(--warn)"}}>Não consigo repartir {fmtKz(p.m.valor)} pelo {p.escolhido} ao kwanza. Registe à mão.</span>:<span className="muted">Quem pagou?</span>}
+                <select className="input" style={{width:"auto",minHeight:32,padding:"2px 8px"}} value={p.escolhido||""} onChange={e=>escolherApt(i,e.target.value)}>
+                  <option value="">Escolher apartamento…</option>{(p.apts?fracoesOrd.filter(f=>p.apts.includes(f.id)):fracoesOrd).map(f=><option key={f.id} value={f.numero}>{f.numero} — {nomeResp(f)}</option>)}</select></span>}
+            </span>
+          </div>
+          <span style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:4}}>
+            <span className="mono" style={{fontSize:14,color:p.m.valor>0?"var(--ok)":"var(--ink)"}}>{fmtSinal(p.m.valor)}</span>
+            {p.tipo!=="manual"&&confTag(p.confianca)}
+          </span>
+        </div>
+      ))}
+    </div>;
+  }
+
   function Conciliacao() {
     if (!temConc && !(appData.extracto||[]).length) return <section className="card" style={{marginBottom:16}}>
       <h2 className="h2" style={{marginBottom:4}}>Conciliação com o banco</h2>
@@ -1286,7 +1363,11 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
           <span className="mono" style={{flexShrink:0,color:m.valor>0?"var(--ok)":"var(--ink)"}}>{fmtSinal(m.valor)}</span>
         </div>)}
         {porIdent.length>40&&<div className="muted" style={{fontSize:13,marginTop:6}}>e mais {porIdent.length-40}.</div>}
-        {porIdent.length>0&&<div className="muted" style={{fontSize:12,marginTop:6}}>Para ligar um movimento, edite o pagamento ou a despesa e escreva o NUM. DOC. em "Movimento do banco". A proposta automática chega na fase 3.</div>}
+        {porIdent.length>0&&!props&&<div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginTop:10}}>
+          <button className="btn btn-red" onClick={()=>setProps(propostasConciliacao(appData).map(p=>({...p, sel: p.tipo!=="manual" && (p.confianca==="Alta"||p.confianca==="Confirmado")})))}><Icon n="zap" s={16}/>Propor correspondências</button>
+          <span className="muted" style={{fontSize:12}}>Também pode ligar à mão: editar o pagamento ou a despesa e escrever o NUM. DOC. em "Movimento do banco".</span>
+        </div>}
+        {props&&Propostas()}
       </div>}
       {itens.length>0&&<div>
         <h3 style={{fontWeight:800,fontSize:15,marginBottom:6}}>Registos da app sem movimento do banco ({itens.length})</h3>

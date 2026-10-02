@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════════
    Constantes, formatação, API e cálculos partilhados
 ════════════════════════════════════════════════════════════════ */
-export const APP_VERSAO = "v7.6";
+export const APP_VERSAO = "v7.7";
 export const API_URL    = "https://script.google.com/macros/s/AKfycbyvN52wjCWtvSOMrRqszVtOZC1OfSnfciOSN1iANp-vH-Ap6wIgchYlUuIu9SUyQgUsVw/exec";
 
 export const MESES   = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -470,4 +470,146 @@ export function movimentosPorIdentificar(appData) {
   const lig = new Set();
   [appData.pagamentosQuota, appData.pagamentosContribuicao, appData.despesas].forEach(l => (l||[]).forEach(r => { if (r.idMov) lig.add(String(r.idMov)); }));
   return (appData.extracto||[]).filter(m => !lig.has(String(m.numDoc)) && !(m.idAntigo && lig.has(m.idAntigo)));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CONCILIAÇÃO — fase 3: livro de NIBs e propostas automáticas
+═══════════════════════════════════════════════════════════════ */
+// Chave de quem paga: o NIB (21 dígitos) se vier na descrição; senão o nome do ordenante.
+// Descrições genéricas ("Transferência") não dão chave.
+const PREFIXOS = /^(TC STC DE|TRF KWIK DE|TRANSF\.? PELO NIB|TRANSFERENCIA DE|TRANSF\.? DE|TC DE|TRF DE)\s+/;
+export function chavePagador(desc) {
+  const s = semAcentos(desc);
+  const nib = s.match(/\d{21}/);
+  if (nib) return nib[0];
+  const nome = s.replace(PREFIXOS, "").replace(/[^A-Z ]/g, " ").replace(/\s+/g, " ").trim();
+  const pal = nome.split(" ").filter(p => p.length > 1);
+  if (pal.length < 2 || /^TRANSFERENCIA|^TRANSF |^PAGAMENTO|^CONDOMINIO/.test(nome)) return "";
+  return "NOME:" + pal.slice(0, 3).join(" ");
+}
+// Livro de NIBs: aprendido das ligações que já existem (movimento ↔ apartamento) e da aba "🔗 NIBs", se existir.
+// Devolve Map chave → [ids de apartamentos], ignorando chaves "genéricas" que apontam para muitos apartamentos.
+export function livroNibs(appData) {
+  const ext = new Map(); (appData.extracto||[]).forEach(m => { ext.set(String(m.numDoc), m); if (m.idAntigo) ext.set(m.idAntigo, m); });
+  const conta = new Map();
+  const junta = (chave, fId) => { if (!chave || !fId) return; if (!conta.has(chave)) conta.set(chave, new Set()); conta.get(chave).add(fId); };
+  [appData.pagamentosQuota, appData.pagamentosContribuicao].forEach(l => (l||[]).forEach(r => {
+    if (!r.idMov || r.canal === "Gestor anterior") return;
+    const m = ext.get(String(r.idMov));
+    junta(chavePagador(m ? m.descricao : r.descExtrato), r.fracaoId);
+  }));
+  const num2id = new Map((appData.fracoes||[]).map(f => [String(f.numero).trim(), f.id]));
+  (appData.nibs||[]).forEach(n => String(n.fracoes||"").split(/[,;/ ]+/).forEach(x => junta(n.chave, num2id.get(x.trim()))));
+  const livro = new Map();
+  conta.forEach((ids, k) => { if (ids.size <= 6) livro.set(k, [...ids]); });
+  return livro;
+}
+
+const diasEntre = (a, b) => Math.abs((new Date(a+"T12:00:00") - new Date(b+"T12:00:00")) / 864e5);
+// Subconjunto de registos cuja soma dá exactamente o valor (prefere os registados juntos e os mais próximos da data)
+function somaExacta(cands, valor, data) {
+  const v = Math.round(valor);
+  // 1) registos do mesmo dia (um pagamento de vários meses fica registado de uma vez)
+  const porDia = {}; cands.forEach(c => { (porDia[(c.r.data||"")+"|"+c.r.fracaoId] ||= []).push(c); });
+  const grupos = Object.values(porDia).filter(g => Math.round(g.reduce((s,c)=>s+c.r.valor,0)) === v)
+    .sort((a,b) => diasEntre(a[0].r.data,data) - diasEntre(b[0].r.data,data));
+  if (grupos.length) return grupos[0];
+  // 2) um só registo
+  const um = cands.filter(c => Math.round(c.r.valor) === v).sort((a,b) => diasEntre(a.r.data,data) - diasEntre(b.r.data,data));
+  if (um.length) return [um[0]];
+  // 3) combinação (limitada), dos registos mais antigos para os mais recentes
+  const l = [...cands].sort((a,b) => (a.r.ano||0)-(b.r.ano||0) || (a.r.mes||0)-(b.r.mes||0) || (a.r.data||"").localeCompare(b.r.data||"")).slice(0, 18);
+  let passos = 0, res = null;
+  const rec = (i, soma, esc) => {
+    if (res || ++passos > 40000) return;
+    if (soma === v && esc.length) { res = [...esc]; return; }
+    if (i >= l.length || soma > v) return;
+    esc.push(l[i]); rec(i+1, soma + Math.round(l[i].r.valor), esc); esc.pop();
+    rec(i+1, soma, esc);
+  };
+  rec(0, 0, []);
+  return res;
+}
+
+// Repartição de uma entrada por um apartamento: quotas em falta mais antigas, depois contribuições abertas em dívida,
+// depois quotas futuras (adiantamento, até 12 meses). Devolve null se não der certo ao kwanza.
+export function repartirEntrada(appData, fId, valor) {
+  const { pagamentosQuota, contribuicoes, pagamentosContribuicao, config } = appData;
+  const f = (appData.fracoes||[]).find(x => x.id === fId);
+  if (!f || inativa(f)) return null;
+  let resto = Math.round(valor);
+  const quotas = [], contribs = [];
+  if (!semQuota(f)) {
+    quotaInfo(fId, pagamentosQuota, config).mesesEmFalta.forEach(m => {
+      if (resto <= 0) return; const v = Math.min(resto, Math.round(m.emFalta)); quotas.push({ mes:m.mes, ano:m.ano, valor:v }); resto -= v; });
+  }
+  contribuicoes.filter(c => !contribFechada(c)).forEach(c => {
+    if (resto <= 0) return; const ci = contribInfo(c, f, pagamentosContribuicao);
+    if (ci.divida > 0) { const v = Math.min(resto, Math.round(ci.divida)); contribs.push({ c, valor:v }); resto -= v; } });
+  if (resto > 0 && !semQuota(f)) {
+    const now = new Date(); let y = now.getFullYear(), m = now.getMonth()+2; if (m > 12) { m = 1; y++; }
+    for (let i = 0; i < 12 && resto > 0; i++) {
+      const ja = quotas.some(q => q.mes===m && q.ano===y) || pagamentosQuota.some(p => p.fracaoId===fId && p.mes===m && p.ano===y);
+      if (!ja) { const q = quotaDoMes(config, y, m); const v = Math.min(resto, q); quotas.push({ mes:m, ano:y, valor:v }); resto -= v; }
+      m++; if (m > 12) { m = 1; y++; }
+    }
+  }
+  return resto === 0 && (quotas.length || contribs.length) ? { quotas, contribs } : null;
+}
+
+// Propostas para os movimentos do extracto ainda sem ligação.
+//   tipo "ligar": registos da app já existentes (sem movimento) que somam o valor
+//   tipo "criar": entrada de um apartamento conhecido sem registos → repartir por quotas/contribuições
+//   tipo "despesa": saída → ligar a uma despesa sem movimento com o mesmo valor, ou criar uma nova
+//   tipo "manual": não há proposta segura (o gestor escolhe o apartamento)
+export function propostasConciliacao(appData, { dias = 10 } = {}) {
+  const livro = livroNibs(appData);
+  const livres = (lista, chave) => (lista||[]).filter(r => !r.idMov && r.metodo !== "Isento" && !["Isento","Numerário","Gestor anterior","Acerto"].includes(r.canal))
+    .map(r => ({ chave, r }));
+  const candEnt = [...livres(appData.pagamentosQuota, "QUOTAS"), ...livres(appData.pagamentosContribuicao, "PGC")];
+  const candDesp = livres(appData.despesas, "DESPESAS");
+  const usados = new Set();
+  // Estado "virtual": o que as propostas anteriores já criaram conta para as seguintes (não repetir meses)
+  const virt = { ...appData, pagamentosQuota:[...(appData.pagamentosQuota||[])], pagamentosContribuicao:[...(appData.pagamentosContribuicao||[])] };
+  return movimentosPorIdentificar(appData).sort((a,b) => (a.dataMov||"").localeCompare(b.dataMov||"")).map(m => {
+    const data = m.dataValor || m.dataMov;
+    const perto = c => !usados.has(c.chave+c.r._row) && c.r.data && diasEntre(c.r.data, data) <= dias;
+    if (m.valor < 0) {
+      const ds = somaExacta(candDesp.filter(perto).map(c => ({ ...c, r:{ ...c.r, fracaoId:"" } })), -m.valor, data);
+      if (ds) { const orig = ds.map(x => candDesp.find(c => c.r._row === x.r._row)); orig.forEach(c => usados.add(c.chave+c.r._row));
+        return { m, tipo:"despesa", ligar:orig, confianca: orig.every(c => diasEntre(c.r.data,data) <= 3) ? "Alta" : "Média" }; }
+      return { m, tipo:"despesa", criarDespesa:{ data, valor:-m.valor, descricao:m.descricao }, confianca:"Média" };
+    }
+    const chave = chavePagador(m.descricao);
+    const apts = chave && livro.get(chave) || null;
+    const cands = candEnt.filter(c => perto(c) && (!apts || apts.includes(c.r.fracaoId)));
+    const sel = somaExacta(cands, m.valor, data);
+    if (sel && (apts || sel.every(c => c.r.fracaoId === sel[0].r.fracaoId))) {
+      sel.forEach(c => usados.add(c.chave+c.r._row));
+      const perfeito = apts && sel.every(c => diasEntre(c.r.data, data) <= 3);
+      return { m, tipo:"ligar", ligar:sel, apts, confianca: perfeito ? (chave.startsWith("NOME:") ? "Alta" : "Confirmado") : "Média" };
+    }
+    if (apts && apts.length === 1) {
+      const rep = repartirEntrada(virt, apts[0], m.valor);
+      if (rep) {
+        rep.quotas.forEach(q => virt.pagamentosQuota.push({ fracaoId:apts[0], mes:q.mes, ano:q.ano, valor:q.valor, metodo:"Transferência", data }));
+        rep.contribs.forEach(x => virt.pagamentosContribuicao.push({ contribuicaoId:x.c.id, fracaoId:apts[0], valor:x.valor, metodo:"Transferência", data }));
+        return { m, tipo:"criar", fId:apts[0], ...rep, apts, confianca: chave.startsWith("NOME:") ? "Média" : "Alta" };
+      }
+    }
+    return { m, tipo:"manual", apts, chave };
+  });
+}
+
+// Proposta para um movimento de entrada quando o gestor escolhe o apartamento à mão:
+// primeiro tenta ligar a registos sem movimento desse apartamento; senão reparte (criar).
+export function propostaParaApt(appData, m, fId, { dias = 10 } = {}) {
+  const data = m.dataValor || m.dataMov;
+  const cands = [["QUOTAS", appData.pagamentosQuota], ["PGC", appData.pagamentosContribuicao]].flatMap(([chave, l]) =>
+    (l||[]).filter(r => r.fracaoId === fId && !r.idMov && r.metodo !== "Isento" && !["Isento","Numerário","Gestor anterior","Acerto"].includes(r.canal) && r.data && diasEntre(r.data, data) <= dias)
+      .map(r => ({ chave, r })));
+  const sel = somaExacta(cands, m.valor, data);
+  if (sel) return { m, tipo:"ligar", ligar:sel, apts:[fId], confianca:"Alta", manual:true };
+  const rep = repartirEntrada(appData, fId, m.valor);
+  return rep ? { m, tipo:"criar", fId, ...rep, apts:[fId], confianca:"Alta", manual:true } : { m, tipo:"manual", apts:[fId], semReparticao:true };
 }

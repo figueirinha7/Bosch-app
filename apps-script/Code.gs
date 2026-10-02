@@ -1,8 +1,17 @@
 // ═══════════════════════════════════════════════════════════════
-//  CONDOMÍNIO — Google Apps Script API  v7.6
+//  CONDOMÍNIO — Google Apps Script API  v7.7
 //  Cole este código em: script.google.com → projecto ligado ao Sheets
 //  Depois: Implementar → Gerir implementações → editar → Nova versão
 //          (Executar como: Eu · Acesso: Qualquer pessoa)
+//
+//  NOVO NA v7.7 — CONCILIAÇÃO COM O BANCO (fase 3)
+//  • conciliar: grava de uma vez as propostas aceites pelo gestor — liga
+//    registos existentes a um movimento do extracto (só as colunas de
+//    reconciliação) e cria os registos em falta (quotas, pagamentos de
+//    contribuições, despesas) já ligados. Verifica todas as linhas antes de
+//    escrever e respeita o fecho de período nos registos novos.
+//  • Lê a aba "🔗 NIBs" (chave, fracoes, nome, nota), se existir: completa o
+//    livro de NIBs que a app aprende das ligações já feitas.
 //
 //  NOVO NA v7.6 — CONCILIAÇÃO COM O BANCO (fase 2)
 //  • Nova aba "🏦 Extracto" (criada na primeira importação): um movimento
@@ -80,7 +89,7 @@
 //  • Editar e apagar lançamentos (quotas, contribuições, despesas, avisos).
 // ═══════════════════════════════════════════════════════════════
 
-const VERSAO         = "v7.6";
+const VERSAO         = "v7.7";
 const SS             = SpreadsheetApp.getActiveSpreadsheet();
 const PROPS          = PropertiesService.getScriptProperties();
 const SESSAO_HORAS   = 8;   // duração de uma sessão de gestor
@@ -672,6 +681,7 @@ function lerDados() {
     despesas:               despesasNorm,
     avisos:                 avisosNorm,
     extracto:               readExtracto(),
+    nibs:                   sheetToObjects("🔗 NIBs").filter(n => n["chave"]).map(n => ({ chave: String(n["chave"]).trim(), fracoes: String(n["fracoes"] || ""), nome: n["nome"] || "" })),
   };
 }
 
@@ -910,6 +920,7 @@ function registar(action, data, res) {
     // Importações grandes: no registo fica só o resumo
     if (Array.isArray(limpo.movimentos)) limpo.movimentos = limpo.movimentos.length + " movimentos";
     if (limpo.mapa && typeof limpo.mapa === "object") limpo.mapa = Object.keys(limpo.mapa).length + " identificadores";
+    if (Array.isArray(limpo.ligar)) limpo.ligar = limpo.ligar.map(l => l.chave + " linha " + l._row + " → " + l.idMov);
     const corta = s => s.length > 40000 ? s.slice(0, 40000) + "…" : s;
     sheet.appendRow([
       Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"),
@@ -1265,6 +1276,38 @@ function executarAccao(action, data) {
       }
       LOG.aba = ABA.EXT;
       return { ok: true, novos: novos.length, repetidos: movs.length - novos.length };
+    }
+
+    // Propostas aceites (fase 3)
+    //   ligar: [{chave:"QUOTAS"|"PGC"|"DESPESAS", _row, _sig, idMov, dataExtrato, descExtrato, valorMov, canal, confianca, notaRec}]
+    //   criar: {QUOTAS:[{fracao_numero, data, valor, mes, ano, ...rec}], PGC:[{contribuicao_id, fracao_numero, data, valor, ...rec}], DESPESAS:[{data, valor, descricao, categoria, ...rec}]}
+    case "conciliar": {
+      const REC = ["idMov", "dataExtrato", "descExtrato", "valorMov", "canal", "confianca", "notaRec"];
+      const ligar = data.ligar || [], criar = data.criar || {};
+      exigir(ligar.length || Object.keys(criar).some(k => (criar[k] || []).length), "Nada para gravar");
+      // 1) verificar todas as linhas antes de escrever
+      const alvo = ligar.map(l => {
+        exigir(["QUOTAS", "PGC", "DESPESAS"].indexOf(l.chave) >= 0, "Tipo inválido");
+        exigir(String(l.idMov || "").trim(), "Falta o movimento");
+        const v = verificarLinha(l.chave, l._row, l._sig);
+        return { l, v };
+      });
+      alvo.forEach(({ l, v }) => {
+        const cols = resolverColunas(v.esq, v.sheet, true);
+        REC.forEach(k => { if (l[k] !== undefined && cols[k]) v.sheet.getRange(v.row, cols[k]).setValue(valorParaFolha(k, k === "canal" ? normCanal(l[k]) : l[k])); });
+      });
+      // 2) criar os registos em falta (já ligados ao movimento)
+      const q = criar.QUOTAS || [], pc = criar.PGC || [], de = criar.DESPESAS || [];
+      [...q, ...pc, ...de].forEach(x => exigirPeriodoAberto(String(x.data || "").slice(0, 7)));
+      q.forEach(x => exigir(x.fracao_numero && x.mes >= 1 && x.mes <= 12 && x.ano > 2000 && Number(x.valor) > 0, "Quota inválida"));
+      if (q.length) acrescentar("QUOTAS", q.map(x => Object.assign({ metodo: "Transferência", referencia: x.idMov, observacoes: "" }, x, { canal: "Banco" })));
+      if (pc.length) acrescentar("PGC", pc.map(x => {
+        const c = contribAberta(x.contribuicao_id);
+        return Object.assign({ metodo: "Transferência", referencia: x.idMov, observacoes: "" }, x, { contribuicao_titulo: c.titulo, canal: "Banco" });
+      }));
+      if (de.length) acrescentar("DESPESAS", de.map(x => Object.assign({ categoria: "Outros", fornecedor: "", numFatura: "", pagoPor: "", observacoes: "" }, x, { canal: "Banco" })));
+      LOG.aba = "Conciliação";
+      return { ok: true, ligados: alvo.length, criados: q.length + pc.length + de.length };
     }
 
     // mapa = {"EXT-20240919-002": "259282390", ...}
