@@ -5,6 +5,10 @@ import { APP_VERSAO, MESES, fmtKz, fmtNum, fmtSinal, fmtDate, fmtDateCurta, fmtD
 import { relatorioMensal } from "./relatoriosHtml.js";
 import { Icon, Modal, MesNav, WaSvg } from "./ui.jsx";
 import { ReportPreview } from "./Relatorios.jsx";
+import fachada from "./assets/fachada.jpg";
+
+// Cores do mural da fachada (faixa por baixo do cabeçalho)
+const CORES_MURAL = [["#2FA39B",3],["#E8C547",2],["#E0735A",2],["#E7A7A0",1],["#3B6FB0",2]];
 
 const TIPO_TAG = { "Notificação":"tag-blue", "Acta de Reunião":"tag-green", "Comunicado":"tag-amber" };
 const dias30 = () => { const d=new Date(); d.setDate(d.getDate()-30); return d.toISOString().slice(0,10); };
@@ -436,16 +440,29 @@ export function PublicView({appData, offline, onGestor}) {
 
   return (
     <div style={{minHeight:"100vh",background:"var(--bg)"}}>
-      <header style={{background:"var(--dark)",color:"#fff"}}>
-        <div style={{maxWidth:840,margin:"0 auto",padding:"14px 16px 12px",display:"flex",flexDirection:"column",gap:2}}>
-          <div className="serif" style={{fontSize:19,fontWeight:700}}>{config.predio}</div>
-          {config.endereco&&<div style={{fontSize:13,color:"var(--dark-ink)"}}>{config.endereco}</div>}
-          <div style={{fontSize:13,color:offline?"#FFD2C4":"var(--dark-ink)",fontWeight:offline?800:400,display:"flex",gap:6,alignItems:"center",marginTop:2}} role={offline?"alert":undefined}>
-            {offline&&<Icon n="alert" s={15}/>}{offline?"Sem ligação · dados de ":"Actualizado "}{fmtDateTime(appData.timestamp)}
+      {/* Cabeçalho: fachada do prédio à direita, a fundir-se no fundo escuro, e faixa com as cores do mural */}
+      <header style={{background:"var(--dark)",color:"#fff",position:"relative"}}>
+        <style>{`.hdr-foto{position:absolute;right:0;top:0;bottom:0;width:min(46%,300px);overflow:hidden}
+          .hdr-end{display:none}@media(min-width:600px){.hdr-end{display:inline}}
+          .hdr-foto img{width:100%;height:100%;object-fit:cover;object-position:70% 22%;display:block}
+          .hdr-foto::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,var(--dark) 0%,rgba(45,41,38,.85) 22%,rgba(45,41,38,0) 62%)}`}</style>
+        <div className="hdr-foto"><img src={fachada} alt="" /></div>
+        <div style={{maxWidth:840,margin:"0 auto",position:"relative"}}>
+          <div style={{padding:"13px 16px 12px",display:"flex",flexDirection:"column",gap:2,maxWidth:"min(64%,560px)"}}>
+            <div style={{fontSize:11,fontWeight:800,letterSpacing:.8,textTransform:"uppercase",color:"#E8C547",lineHeight:1.3}}>Portal do Condomínio</div>
+            <h1 className="serif" style={{fontSize:20,fontWeight:700,lineHeight:1.2,margin:0}}>{config.predio}</h1>
+            <div style={{fontSize:12,color:offline?"#FFD2C4":"var(--dark-ink)",fontWeight:offline?800:400,display:"flex",gap:6,alignItems:"center",marginTop:3}} role={offline?"alert":undefined}>
+              {offline?<Icon n="alert" s={14}/>:<span aria-hidden="true" style={{width:7,height:7,borderRadius:4,background:"#5BC28A",flexShrink:0}}/>}
+              <span>{config.endereco&&<span className="hdr-end">{config.endereco} · </span>}{offline?"Sem ligação · dados de ":"Actualizado "}{fmtDateTime(appData.timestamp)}</span>
+            </div>
           </div>
         </div>
       </header>
       <nav aria-label="Secções" style={{background:"#fff",borderBottom:"1px solid var(--line)",position:"sticky",top:0,zIndex:50}}>
+        {/* Faixa com as cores do mural: faz parte da barra fixa, por isso continua visível ao fazer scroll */}
+        <div aria-hidden="true" style={{display:"flex",height:5}}>
+          {CORES_MURAL.map(([c,g])=><div key={c} style={{flexGrow:g,background:c}}/>)}
+        </div>
         <div style={{maxWidth:840,margin:"0 auto",display:"grid",gridTemplateColumns:`repeat(${TABS.length},minmax(0,1fr))`}}>
           {TABS.map(([k,l])=>(
             <button key={k} className={`nav-tab${tab===k?" on":""}`} style={{justifyContent:"center",padding:"0 4px"}} aria-current={tab===k?"page":undefined} onClick={()=>setTab(k)}>
