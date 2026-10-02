@@ -6,7 +6,7 @@ Lista de trabalho da app (Vercel: bosch-app-4xip.vercel.app) e do Apps Script
 ## 🧪 v7.3 (branch `beta`, ainda não no `main`) — título e cabeçalho da página pública
 
 - Título da aba do navegador: "Portal do Condomínio - Prédio da Bosch".
-- Cabeçalho da página pública com a fachada do prédio (mural) à direita, "Portal do Condomínio" em destaque e faixa com as cores do mural. Mesma altura do anterior; a morada aparece só em ecrãs largos. Proposta escolhida: A + faixa da C (Claude Design).
+- Cabeçalho da página pública com a fachada do prédio (mural) à direita, "Portal do Condomínio" em destaque e faixa com as cores do mural, que fica fixa por cima dos separadores ao fazer scroll. Mesma altura do anterior; a morada aparece só em ecrãs largos. Proposta escolhida: A + faixa da C (Claude Design).
 - Só app; o Apps Script não muda.
 
 ## ✅ v7.2 (no `main` desde 02/10/2026, PR #7) — estatísticas de visitas

@@ -442,7 +442,7 @@ export function PublicView({appData, offline, onGestor}) {
     <div style={{minHeight:"100vh",background:"var(--bg)"}}>
       {/* Cabeçalho: fachada do prédio à direita, a fundir-se no fundo escuro, e faixa com as cores do mural */}
       <header style={{background:"var(--dark)",color:"#fff",position:"relative"}}>
-        <style>{`.hdr-foto{position:absolute;right:0;top:0;bottom:5px;width:min(46%,300px);overflow:hidden}
+        <style>{`.hdr-foto{position:absolute;right:0;top:0;bottom:0;width:min(46%,300px);overflow:hidden}
           .hdr-end{display:none}@media(min-width:600px){.hdr-end{display:inline}}
           .hdr-foto img{width:100%;height:100%;object-fit:cover;object-position:70% 22%;display:block}
           .hdr-foto::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,var(--dark) 0%,rgba(45,41,38,.85) 22%,rgba(45,41,38,0) 62%)}`}</style>
@@ -457,11 +457,12 @@ export function PublicView({appData, offline, onGestor}) {
             </div>
           </div>
         </div>
+      </header>
+      <nav aria-label="Secções" style={{background:"#fff",borderBottom:"1px solid var(--line)",position:"sticky",top:0,zIndex:50}}>
+        {/* Faixa com as cores do mural: faz parte da barra fixa, por isso continua visível ao fazer scroll */}
         <div aria-hidden="true" style={{display:"flex",height:5}}>
           {CORES_MURAL.map(([c,g])=><div key={c} style={{flexGrow:g,background:c}}/>)}
         </div>
-      </header>
-      <nav aria-label="Secções" style={{background:"#fff",borderBottom:"1px solid var(--line)",position:"sticky",top:0,zIndex:50}}>
         <div style={{maxWidth:840,margin:"0 auto",display:"grid",gridTemplateColumns:`repeat(${TABS.length},minmax(0,1fr))`}}>
           {TABS.map(([k,l])=>(
             <button key={k} className={`nav-tab${tab===k?" on":""}`} style={{justifyContent:"center",padding:"0 4px"}} aria-current={tab===k?"page":undefined} onClick={()=>setTab(k)}>
