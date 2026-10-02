@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════════
    Constantes, formatação, API e cálculos partilhados
 ════════════════════════════════════════════════════════════════ */
-export const APP_VERSAO = "v7.4";
+export const APP_VERSAO = "v7.5";
 export const API_URL    = "https://script.google.com/macros/s/AKfycbyvN52wjCWtvSOMrRqszVtOZC1OfSnfciOSN1iANp-vH-Ap6wIgchYlUuIu9SUyQgUsVw/exec";
 
 export const MESES   = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -351,3 +351,57 @@ export function andarDe(f) {
   return null;
 }
 export const nomeAndar = (n) => n===null ? "Outros" : n===0 ? "R/C" : `${n}º`;
+
+/* ═══════════════════════════════════════════════════════════════
+   CONCILIAÇÃO COM O BANCO (fase 1)
+   Colunas lidas pelo Apps Script (só gestor): idMov, dataExtrato, descExtrato,
+   valorMov, canal, confianca, notaRec.
+═══════════════════════════════════════════════════════════════ */
+export const CANAIS = ["Banco","Numerário","Gestor anterior","Isento","Acerto"];
+const FORA_BANCO = ["Numerário","Gestor anterior","Acerto"];
+// Estado de um registo (quota, pagamento de contribuição ou despesa)
+//   conciliado  — ligado a um movimento do extracto
+//   isento      — isenção (não mexe em dinheiro)
+//   fora        — dinheiro que não passou pelo banco (numerário, gestor anterior, acerto)
+//   porConciliar— o resto
+export function estadoConc(r) {
+  if (!r) return { k:"porConciliar" };
+  if (r.metodo === "Isento" || r.canal === "Isento") return { k:"isento", label:"Isento", tag:"tag-grey" };
+  if (r.idMov) return { k:"conciliado", label: r.canal==="Gestor anterior" ? "Banco · gestor anterior" : "No banco", tag:"tag-green" };
+  if (FORA_BANCO.includes(r.canal)) return { k:"fora", label: r.canal, tag:"tag-blue" };
+  return { k:"porConciliar", label:"Por conciliar", tag:"tag-amber" };
+}
+// A folha tem as colunas de reconciliação? (sem elas, os sinais ficam escondidos)
+export const temConciliacao = (appData) =>
+  [appData.pagamentosQuota, appData.pagamentosContribuicao, appData.despesas].some(l => (l||[]).some(r => r.idMov || r.canal));
+
+// Saldo da app explicado pelos movimentos do banco, até ao fim de um mês (aaaa-mm; por omissão, tudo):
+//   saldo da app = movimentos do banco ligados + entradas sem movimento − despesas sem movimento + diferenças
+// "banco" é o saldo que o extracto deve mostrar nessa data (a comparar com o banco).
+// "diferenças" = registos que somam mais (ou menos) do que o movimento a que estão ligados
+// (ex.: quotas pagas ao gestor anterior, todas ligadas a um único depósito).
+export function resumoConciliacao(appData, ate) {
+  const dentro = (d) => !ate || (KEY_RE.test(d||"") ? d.slice(0,7) <= ate : true);
+  const movs = {};      // id → { data, valor (com sinal), soma dos registos (com sinal) }
+  const r = { app:0, banco:0, entradasSem:0, despesasSem:0, nEntradasSem:0, nDespesasSem:0, cont:{conciliado:0,isento:0,fora:0,porConciliar:0} };
+  const passa = (x, sinal, dataCaixa) => {
+    const e = estadoConc(x); r.cont[e.k]++;
+    if (e.k === "isento" || !dentro(dataCaixa)) return;
+    const v = sinal * (x.valor||0);
+    r.app += v;
+    if (x.idMov) {
+      const m = (movs[x.idMov] ||= { data: x.dataExtrato || dataCaixa, valor: sinal * (x.valorMov ?? x.valor ?? 0), soma: 0 });
+      m.soma += v;
+    } else if (sinal > 0) { r.entradasSem += v; r.nEntradasSem++; }
+    else { r.despesasSem += -v; r.nDespesasSem++; }
+  };
+  (appData.pagamentosQuota||[]).forEach(p => passa(p, 1, mesCaixaQuota(p)+"-01"));
+  (appData.pagamentosContribuicao||[]).forEach(p => passa(p, 1, p.data));
+  (appData.despesas||[]).forEach(d => passa(d, -1, d.data));
+  const lista = Object.entries(movs).filter(([,m]) => dentro(m.data));
+  r.banco = lista.reduce((s,[,m]) => s + m.valor, 0);
+  r.nMovs = lista.length;
+  r.difs = lista.filter(([,m]) => Math.abs(m.soma - m.valor) > 0.5).map(([id,m]) => ({ id, ...m, dif: m.soma - m.valor }));
+  r.dif = r.difs.reduce((s,x) => s + x.dif, 0);
+  return r;
+}

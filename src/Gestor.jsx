@@ -4,7 +4,8 @@ import { MESES, MESES_S, CATS, AVISO_TIPOS, METODOS, ESTADOS_CONTRIB, today, cha
   fmtKz, fmtNum, fmtSinal, fmtDate, fmtDateCurta, nomeApt, apiPost, waAbrir, msgLembrete, msgAviso,
   quotaInfo, estadoMes, nivelAtraso, contribInfo, contribFechada, ordenarContribs, metaContrib, situacaoApt, intervaloMeses, alocar, resumoMeses,
   fluxoMensal, contaMes, serieMeses, cobrancaMes, rascunhoGet, rascunhoSet, msgRecibo, nomeResp, nomeOutro,
-  inativa, semQuota, quotaDoMes, quotaAtual, historicoQuota, mesCaixaQuota, fmtDateTime } from "./lib.js";
+  inativa, semQuota, quotaDoMes, quotaAtual, historicoQuota, mesCaixaQuota, fmtDateTime,
+  CANAIS, estadoConc, temConciliacao, resumoConciliacao } from "./lib.js";
 import { Icon, WaSvg, Modal, FG, CheckRow, Warn, Info, ModalBtns, RowActions, MesSelect, AnoSelect, Segmented,
   MesNav, Menu, AptCombo, ConfirmModal, Toast } from "./ui.jsx";
 import { AvisoCard } from "./Publico.jsx";
@@ -54,6 +55,15 @@ function Kpi({label, valor, sub, cor, children, onClick, acao}) {
   return onClick
     ? <button className="kpi" onClick={onClick} style={{textAlign:"left",font:"inherit",color:"inherit",cursor:"pointer"}}>{conteudo}</button>
     : <div className="kpi">{conteudo}</div>;
+}
+
+// Conciliação com o banco: sinal de cada registo (só aparece quando a folha tem as colunas)
+function ConcTag({r, curto}) {
+  const e = estadoConc(r);
+  if (e.k === "isento") return null;
+  const tip = [r.idMov, r.dataExtrato&&fmtDate(r.dataExtrato), r.valorMov!=null&&`movimento ${fmtKz(r.valorMov)}`, r.confianca&&`confiança: ${r.confianca}`, r.notaRec].filter(Boolean).join(" · ");
+  return <span className={`tag ${e.tag}`} title={tip||undefined} style={{whiteSpace:"nowrap"}}>
+    {e.k==="conciliado"&&<Icon n="check" s={11} w={3}/>}{curto ? (e.k==="conciliado"?"banco":e.k==="porConciliar"?"por conciliar":e.label.toLowerCase()) : e.label}</span>;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -132,6 +142,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
   const [qAno,setQAno]=useState(anoAtual);
   const [qTxt,setQTxt]=useState(""); const [qEst,setQEst]=useState("todos");
   const [hist,setHist]=useState(false);
+  const [hConc,setHConc]=useState("todos");   // histórico de quotas: todos | porConciliar
   const [fApt,setFApt]=useState("");
   const [fDAno,setFDAno]=useState(""); const [fDCat,setFDCat]=useState(""); const [fDTxt,setFDTxt]=useState("");
   const [abertos,setAbertos]=useState({});
@@ -143,6 +154,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
 
   const { config, fracoes, pagamentosQuota, contribuicoes, pagamentosContribuicao, despesas, avisos=[] } = appData;
   const { anoBase, mesBase } = config;
+  const temConc = useMemo(()=>temConciliacao(appData),[appData]);
   const hQuota = historicoQuota(config);
 
   /* ── rascunho e sessão ── */
@@ -241,18 +253,22 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
   };
   const abrirQuota = (num, meses)=> om("pagQuota",{ metodo:"Transferência", anoVista:anoAtual, sel:[], valor:"",
     ...(num?selDoApt(num):{}), ...(meses?{sel:meses.map(m=>chaveMes(m.ano,m.mes)), anoVista:meses[0].ano}:{}) });
-  const abrirEditQuota = (p)=>{ const f=aptById(p.fracaoId); om("editQuota",{_row:p._row,_sig:p._sig,fracaoNum:f?.numero||"",mes:p.mes||mesAtual,ano:p.ano||anoAtual,data:p.data||today(),valor:p.valor,metodo:p.metodo||"",referencia:p.referencia||""}); };
+  // Campos de conciliação de um registo (o original fica em _rec para só enviar o que mudou)
+  const recForm = x => ({ canal:x.canal||"", idMov:x.idMov||"", notaRec:x.notaRec||"",
+    _rec:{ canal:x.canal||"", idMov:x.idMov||"", notaRec:x.notaRec||"", dataExtrato:x.dataExtrato, descExtrato:x.descExtrato, valorMov:x.valorMov, confianca:x.confianca } });
+  const recAlterado = ()=>{ const o=form._rec||{}, d={}; ["canal","idMov","notaRec"].forEach(k=>{ if((form[k]||"")!==(o[k]||"")) d[k]=String(form[k]||"").trim(); }); return d; };
+  const abrirEditQuota = (p)=>{ const f=aptById(p.fracaoId); om("editQuota",{_row:p._row,_sig:p._sig,fracaoNum:f?.numero||"",mes:p.mes||mesAtual,ano:p.ano||anoAtual,data:p.data||today(),valor:p.valor,metodo:p.metodo||"",referencia:p.referencia||"",...recForm(p)}); };
   const abrirIsencao = (num, m)=> om("isentarMes",{fracaoNum:num||"",mesIni:m?.mes||mesAtual,anoIni:m?.ano||anoAtual,mesFim:m?.mes||mesAtual,anoFim:m?.ano||anoAtual});
   const abrirContrib = (c)=> c
     ? om("contrib",{_row:c._row,_sig:c._sig,id:c.id,titulo:c.titulo,descricao:c.descricao||"",valorPorFracao:c.valorPorFracao||"",valorTotal:c.valorTotal||"",
         dataVencimento:c.dataVencimento||"",categoria:c.categoria||"",estado:c.estado||"Aberto",excluidos:(c.excluidos||[]).map(id=>aptById(id)?.numero||id)})
     : om("contrib",{excluidos:[]});
   const abrirPagContrib = (p, pre={})=> p
-    ? om("pagContrib",{_row:p._row,_sig:p._sig,contribId:p.contribuicaoId,fracaoNum:aptById(p.fracaoId)?.numero||"",data:p.data||today(),valor:p.valor,metodo:p.metodo||""})
+    ? om("pagContrib",{_row:p._row,_sig:p._sig,contribId:p.contribuicaoId,fracaoNum:aptById(p.fracaoId)?.numero||"",data:p.data||today(),valor:p.valor,metodo:p.metodo||"",...recForm(p)})
     : om("pagContrib",{metodo:"Transferência",...pre,...(pre.contribId&&contribById(pre.contribId)?.valorPorFracao?{valor:contribById(pre.contribId).valorPorFracao}:{})});
   const abrirBulk = (cid)=>{ const c=contribById(cid); om("pagContribBulk",{contribId:cid||"",bulkApts:[],metodo:"Transferência",...(c?.valorPorFracao?{valor:c.valorPorFracao}:{})}); };
   const abrirDespesa = (d)=> d
-    ? om("despesa",{_row:d._row,_sig:d._sig,data:d.data,descricao:d.descricao,categoria:d.categoria,valor:d.valor,fornecedor:d.fornecedor||"",observacoes:d.observacoes||""})
+    ? om("despesa",{_row:d._row,_sig:d._sig,data:d.data,descricao:d.descricao,categoria:d.categoria,valor:d.valor,fornecedor:d.fornecedor||"",observacoes:d.observacoes||"",...recForm(d)})
     : om("despesa");
   const abrirAviso = (a)=> a
     ? om("aviso",{_row:a._row,_sig:a._sig,tipo:a.tipo,titulo:a.titulo,conteudo:a.conteudo||"",data:a.data||today(),autor:a.autor||""})
@@ -309,7 +325,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
     if(!f) return fail("Escolha o apartamento","apt");
     if(!form.data) return fail("Indique a data","data");
     if(form.valor===""||isNaN(+form.valor)||+form.valor<0) return fail("Indique um valor válido","valor");
-    post("edit_pagamento_quota",{_row:form._row,_sig:form._sig,fracao_numero:f.numero,data:form.data,valor:+form.valor,mes:+form.mes,ano:+form.ano,metodo:form.metodo||"",referencia:form.referencia||""});
+    post("edit_pagamento_quota",{_row:form._row,_sig:form._sig,fracao_numero:f.numero,data:form.data,valor:+form.valor,mes:+form.mes,ano:+form.ano,metodo:form.metodo||"",referencia:form.referencia||"",...recAlterado()});
   };
   const submitValorQuota = ()=>{
     const v=Math.round(+form.valor), mes=+form.mes, ano=+form.ano;
@@ -344,7 +360,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
     if(!(+form.valor>0)) return fail("Indique um valor maior que zero","valor");
     if(!form.data) return fail("Indique a data","data");
     const d={contribuicao_id:c.id,fracao_numero:f.numero,data:form.data,valor:+form.valor,metodo:form.metodo||""};
-    if(form._row) return post("edit_pagamento_contribuicao",{...d,_row:form._row,_sig:form._sig});
+    if(form._row) return post("edit_pagamento_contribuicao",{...d,...recAlterado(),_row:form._row,_sig:form._sig});
     const ci=contribInfo(c,f,pagamentosContribuicao);
     const motivo = ci.isLivre ? null : ci.isento ? "está isento desta contribuição" : ci.inativo ? "está inactivo" : ci.excluido ? "está excluído desta contribuição" : ci.pago ? `já pagou esta contribuição (${fmtKz(ci.totalPago)})` : null;
     if (motivo) return setConfirmar({ title:"Registar mesmo assim?", okLabel:"Registar", body:`O apartamento ${f.numero} ${motivo}.`, onOk:()=>post("add_pagamento_contribuicao",d) });
@@ -382,7 +398,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
     if(!form.categoria) return fail("Escolha a categoria","categoria");
     if(!(+form.valor>0)) return fail("Indique um valor maior que zero","valor");
     const d={data:form.data,valor:+form.valor,descricao:form.descricao.trim(),categoria:form.categoria,fornecedor:form.fornecedor||"",observacoes:form.observacoes||""};
-    form._row ? post("edit_despesa",{...d,_row:form._row,_sig:form._sig}) : post("add_despesa",d);
+    form._row ? post("edit_despesa",{...d,...recAlterado(),_row:form._row,_sig:form._sig}) : post("add_despesa",{...d,...(form.canal?{canal:form.canal}:{})});
   };
   const submitAviso = ()=>{
     if(!form.tipo) return fail("Escolha o tipo","tipo");
@@ -648,6 +664,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
     const cobrado = MESES.map((_,i)=>pagamentosQuota.filter(p=>p.ano===qAno&&p.mes===i+1&&p.metodo!=="Isento").reduce((s,p)=>s+p.valor,0));
     const histList = [...pagamentosQuota].filter(p=>p.ano===qAno||(!p.ano&&(p.data||"").startsWith(qAno+"-")))
       .filter(p=>!t||String(aptById(p.fracaoId)?.numero||"").toLowerCase().includes(t)||[nomeApt(aptById(p.fracaoId)),aptById(p.fracaoId)?.inq_nome].some(x=>String(x||"").toLowerCase().includes(t)))
+      .filter(p=>hConc==="todos"||estadoConc(p).k===hConc)
       .sort((a,b)=>(b.data||"").localeCompare(a.data||"")||(b.mes-a.mes));
     return <>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12,marginBottom:14}}>
@@ -689,10 +706,12 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
                 </button></td>
                 {MESES.map((nm,i)=>{
                   const e = estadoMes(f, qAno, i+1, pagamentosQuota, config);
+                  const semBanco = temConc && e.regs.some(p=>estadoConc(p).k==="porConciliar");
                   return <td key={i} className={i+1===cur?"qcur":""}>
-                    <button className="qcel" style={CEL_Q[e.k]} disabled={e.k==="excluido"||e.k==="inativo"} aria-label={`${f.numero}, ${nm} ${qAno}: ${EST_LBL[e.k]}${e.pago&&e.k!=="pago"?`, pago ${fmtNum(e.pago)}`:""}`}
+                    <button className="qcel" style={{...CEL_Q[e.k],position:"relative"}} disabled={e.k==="excluido"||e.k==="inativo"} aria-label={`${f.numero}, ${nm} ${qAno}: ${EST_LBL[e.k]}${e.pago&&e.k!=="pago"?`, pago ${fmtNum(e.pago)}`:""}`}
                       title={`${nm}: ${EST_LBL[e.k]}${e.pago?` · ${fmtKz(e.pago)}`:""}`} onClick={()=>setCel({f, ano:qAno, mes:i+1})}>
                       {e.k==="pago"?<Icon n="check" s={14} w={3.2}/>:e.k==="parcial"?Math.round(e.pago/1000):e.k==="falta"?"–":e.k==="isento"?"I":e.k==="excluido"||e.k==="inativo"?"—":""}
+                      {semBanco&&<span aria-label="por conciliar com o banco" style={{position:"absolute",top:2,right:2,width:7,height:7,borderRadius:4,background:"#E8A33B",border:"1px solid #fff"}}/>}
                     </button>
                   </td>;
                 })}
@@ -716,13 +735,17 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
           <span><i className="sw" style={{...CEL_Q.isento,width:20,height:16}}/>Isento</span>
           <span><i className="sw" style={{...CEL_Q.futuro,width:20,height:16}}/>Por vencer</span>
           {fracoes.some(inativa)&&<span><i className="sw" style={{...CEL_Q.inativo,width:20,height:16}}/>Inactivo</span>}
+          {temConc&&<span><i className="sw" style={{width:9,height:9,borderRadius:5,background:"#E8A33B"}}/>Por conciliar com o banco</span>}
         </div>
         <span className="muted" style={{fontSize:13}}>Quota actual: <b className="mono" style={{color:"var(--ink)"}}>{fmtKz(quotaAtual(config))}</b>/mês · Toque num mês para registar, isentar ou ver os pagamentos.</span>
       </div>
 
       {hist&&<section className="card" style={{marginTop:16,overflowX:"auto"}}>
-        <h2 className="h2" style={{marginBottom:8}}>Histórico de pagamentos {qAno} <span className="muted" style={{fontFamily:"Nunito",fontSize:14}}>· {histList.length} registos · <span className="mono">{fmtKz(histList.reduce((s,p)=>s+p.valor,0))}</span></span></h2>
-        <table><thead><tr><th>Data</th><th>Apt.</th><th className="hide-sm">Responsável</th><th>Mês</th><th className="num">Valor</th><th className="hide-sm">Método</th><th></th></tr></thead>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:8}}>
+          <h2 className="h2">Histórico de pagamentos {qAno} <span className="muted" style={{fontFamily:"Nunito",fontSize:14}}>· {histList.length} registos · <span className="mono">{fmtKz(histList.reduce((s,p)=>s+p.valor,0))}</span></span></h2>
+          {temConc&&<Segmented label="Conciliação" value={hConc} onChange={setHConc} options={[["todos","Todos"],["porConciliar","Por conciliar"],["fora","Fora do banco"],["conciliado","No banco"]]}/>}
+        </div>
+        <table><thead><tr><th>Data</th><th>Apt.</th><th className="hide-sm">Responsável</th><th>Mês</th><th className="num">Valor</th><th className="hide-sm">Método</th>{temConc&&<th>Banco</th>}<th></th></tr></thead>
         <tbody>{histList.map(p=>{ const f=aptById(p.fracaoId); return <tr key={p.id}>
           <td className="muted" style={{fontSize:13}}>{fmtDate(p.data)}</td>
           <td><span className="apt-num">{f?.numero||"?"}</span></td>
@@ -730,6 +753,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
           <td>{p.mes&&p.ano?<span className="tag tag-blue">{MESES_S[p.mes-1]} {p.ano}</span>:<span className="tag tag-red">Sem mês</span>}</td>
           <td className="num">{p.metodo==="Isento"?"—":fmtNum(p.valor)}</td>
           <td className="hide-sm muted" style={{fontSize:13}}>{p.metodo==="Isento"?<span className="tag tag-grey" title={p.referencia}>Isento</span>:(p.metodo||"—")}</td>
+          {temConc&&<td><ConcTag r={p} curto/></td>}
           <td><div style={{display:"flex",gap:6,justifyContent:"flex-end"}}>
             {p.metodo!=="Isento"&&<button className="btn btn-ghost btn-icon btn-sm" onClick={()=>setRecibo(reciboDePagamento(appData,p))} aria-label={`Recibo do pagamento do ${f?.numero||""}`} title="Recibo"><Icon n="file" s={16}/></button>}
             {bloqQ(p)?<Cadeado/>:<RowActions desc={`pagamento do ${f?.numero||""}`} onEdit={()=>abrirEditQuota(p)} onDelete={()=>apagarQuota(p)}/>}</div></td>
@@ -758,8 +782,9 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
             {e.regs.map(p=>(
               <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid var(--line-2)"}}>
                 <span style={{display:"flex",flexDirection:"column"}}>
-                  <b style={{fontSize:14}}>{p.metodo==="Isento"?"Isenção":fmtKz(p.valor)}</b>
-                  <span className="muted" style={{fontSize:13}}>{[fmtDate(p.data),p.metodo!=="Isento"&&p.metodo,p.referencia].filter(Boolean).join(" · ")}</span>
+                  <span style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}><b style={{fontSize:14}}>{p.metodo==="Isento"?"Isenção":fmtKz(p.valor)}</b>{temConc&&<ConcTag r={p}/>}</span>
+                  <span className="muted" style={{fontSize:13}}>{[fmtDate(p.data),p.metodo!=="Isento"&&p.metodo,p.referencia!==p.idMov&&p.referencia].filter(Boolean).join(" · ")}</span>
+                  {p.idMov&&<span className="muted" style={{fontSize:12}}>{[p.idMov,p.valorMov!=null&&`movimento ${fmtKz(p.valorMov)}`,p.descExtrato].filter(Boolean).join(" · ")}</span>}
                 </span>
                 <span style={{display:"flex",gap:6,alignItems:"center"}}>
                   {p.metodo!=="Isento"&&<button className="btn btn-outline btn-sm" onClick={()=>{ fechar(); setRecibo(reciboDePagamento(appData,p)); }}><Icon n="file" s={15}/>Recibo</button>}
@@ -1034,12 +1059,13 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
               {pcs.length>0&&<button className="btn btn-ghost" aria-expanded={aberto} onClick={()=>setAbertos(a=>({...a,[c.id]:!a[c.id]}))} style={{marginLeft:"auto"}}>
                 <Icon n={aberto?"up":"down"} s={16}/>Pagamentos ({pcs.length})</button>}
             </div>
-            {aberto&&<div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Apt.</th><th className="hide-sm">Responsável</th><th className="num">Valor</th><th></th></tr></thead>
+            {aberto&&<div style={{overflowX:"auto"}}><table><thead><tr><th>Data</th><th>Apt.</th><th className="hide-sm">Responsável</th><th className="num">Valor</th>{temConc&&<th>Banco</th>}<th></th></tr></thead>
               <tbody>{[...pcs].sort((a,b)=>(b.data||"").localeCompare(a.data||"")).map(p=>{const f=aptById(p.fracaoId);return<tr key={p.id}>
                 <td className="muted" style={{fontSize:13}}>{fmtDate(p.data)}</td>
                 <td><span className="apt-num">{f?.numero||"?"}</span></td>
                 <td className="hide-sm">{nomeResp(f)}</td>
                 <td className="num">{p.metodo==="Isento"?<span className="tag tag-grey" title={p.referencia}>Isento</span>:fmtNum(p.valor)}</td>
+                {temConc&&<td><ConcTag r={p} curto/></td>}
                 <td>{bloqD(p)?<Cadeado/>:<RowActions desc={`pagamento do ${f?.numero||""}`} onEdit={p.metodo==="Isento"?null:()=>abrirPagContrib(p)}
                   onDelete={()=>apagar("delete_pagamento_contribuicao",p,`o ${p.metodo==="Isento"?"registo de isenção":"pagamento"} do apt. ${f?.numero||"?"} em “${c.titulo}”`,undoPagContrib(p))}/>}</td>
               </tr>;})}</tbody></table></div>}
@@ -1081,7 +1107,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
         ))}
       </section>}
       <section className="card hide-sm" style={{overflowX:"auto",padding:"8px 20px"}}>
-        <table><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th className="num">Valor</th><th>Fornecedor</th><th>Obs.</th><th></th></tr></thead>
+        <table><thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th className="num">Valor</th><th>Fornecedor</th><th>Obs.</th>{temConc&&<th>Banco</th>}<th></th></tr></thead>
         <tbody>{despFilt.map(d=>(
           <tr key={d.id}>
             <td className="muted" style={{fontSize:13,whiteSpace:"nowrap"}}>{fmtDate(d.data)}</td>
@@ -1090,6 +1116,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
             <td className="num">{fmtNum(d.valor)}</td>
             <td className="muted" style={{fontSize:13}}>{d.fornecedor||"—"}</td>
             <td className="muted" style={{fontSize:13,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={d.observacoes}>{d.observacoes||"—"}</td>
+            {temConc&&<td><ConcTag r={d} curto/></td>}
             <td>{bloqD(d)?<Cadeado/>:<RowActions desc={`despesa ${d.descricao}`} onEdit={()=>abrirDespesa(d)} onDelete={()=>apagar("delete_despesa",d,`a despesa “${d.descricao}” (${fmtKz(d.valor)})`,undoDespesa(d))}/>}</td>
           </tr>
         ))}</tbody></table>
@@ -1101,6 +1128,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
             <span style={{display:"flex",flexDirection:"column",flex:1,minWidth:0}}>
               <b style={{fontSize:15}}>{d.descricao}</b>
               <span className="muted" style={{fontSize:13}}>{fmtDateCurta(d.data)} · {d.categoria}{d.fornecedor?` · ${d.fornecedor}`:""}</span>
+              {temConc&&<span style={{marginTop:3}}><ConcTag r={d} curto/></span>}
             </span>
             <span className="mono" style={{fontSize:14}}>{fmtNum(d.valor)}</span>
             {bloqD(d)?<Cadeado/>:<Menu label="" icon="more" ariaLabel={`Acções da despesa ${d.descricao}`} btnClass="btn btn-ghost btn-icon" items={[
@@ -1137,6 +1165,68 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
   }
 
   /* ═══════════════════════════════════════════════════════════════
+     CONCILIAÇÃO COM O BANCO (fase 1) — dentro de Gestão
+     Saldo da app = saldo do banco pelos movimentos ligados
+                    + entradas sem movimento − despesas sem movimento
+                    + diferenças em movimentos partilhados
+  ═══════════════════════════════════════════════════════════════ */
+  function Conciliacao() {
+    if (!temConc) return <section className="card" style={{marginBottom:16}}>
+      <h2 className="h2" style={{marginBottom:4}}>Conciliação com o banco</h2>
+      <div className="muted" style={{fontSize:14,lineHeight:1.5}}>A folha ainda não tem as colunas de reconciliação (<code>id_movimento</code>, <code>canal</code>, …) nas abas de quotas, contribuições e despesas. Quando tiver, aparece aqui a comparação com o banco.</div>
+    </section>;
+    const rc = resumoConciliacao(appData);
+    const meses = []; { let y=anoAtual, m=mesAtual; for(let i=0;i<12;i++){ meses.push(chaveMes(y,m)); m--; if(m<1){m=12;y--;} } }
+    const porMes = meses.map(k=>{ const x=resumoConciliacao(appData,k); return { k, app:x.app, banco:x.banco, dif:x.app-x.banco }; });
+    const lblK = k => `${MESES_S[+k.slice(5,7)-1]} ${k.slice(0,4)}`;
+    const itens = [
+      ...pagamentosQuota.map(p=>({ r:p, tipo:"Quota", data:p.data, desc:`${aptById(p.fracaoId)?.numero||"?"} · ${p.mes?MESES_S[p.mes-1]+" "+p.ano:""}`, v:p.valor, abrir:()=>abrirEditQuota(p) })),
+      ...pagamentosContribuicao.map(p=>({ r:p, tipo:"Contribuição", data:p.data, desc:`${aptById(p.fracaoId)?.numero||"?"} · ${contribById(p.contribuicaoId)?.titulo||""}`, v:p.valor, abrir:()=>abrirPagContrib(p) })),
+      ...despesas.map(d=>({ r:d, tipo:"Despesa", data:d.data, desc:d.descricao, v:-d.valor, abrir:()=>abrirDespesa(d) })),
+    ].map(x=>({...x, e:estadoConc(x.r)})).filter(x=>x.e.k==="porConciliar"||x.e.k==="fora").sort((a,b)=>(b.data||"").localeCompare(a.data||""));
+    const linha = (l, v, o={}) => <div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"5px 0",fontSize:15,fontWeight:o.forte?800:400}}><span>{l}</span><span className="mono" style={{color:o.cor,whiteSpace:"nowrap"}}>{o.sinal?fmtSinal(v):fmtKz(v)}</span></div>;
+    return <section className="card" style={{marginBottom:16,display:"flex",flexDirection:"column",gap:14}}>
+      <h2 className="h2" style={{display:"flex",gap:8,alignItems:"center"}}><Icon n="checkCircle" s={18}/>Conciliação com o banco</h2>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16}}>
+        <div style={{background:"var(--surface-2)",border:"1px solid var(--line)",borderRadius:12,padding:"8px 16px"}}>
+          {linha(<b>Saldo no banco (movimentos ligados)</b>, rc.banco, {forte:true})}
+          <div className="muted" style={{fontSize:12,marginTop:-2,marginBottom:4}}>{rc.nMovs} movimentos do extracto · confirme que é o saldo que o banco mostra</div>
+          {linha(`+ Entradas sem movimento (${rc.nEntradasSem})`, rc.entradasSem, {sinal:true})}
+          {linha(`− Despesas sem movimento (${rc.nDespesasSem})`, -rc.despesasSem, {sinal:true})}
+          {rc.difs.length>0&&linha(`± Movimentos partilhados (${rc.difs.length})`, rc.dif, {sinal:true})}
+          {rc.difs.map(x=><div key={x.id} className="muted" style={{fontSize:12,paddingLeft:12}}>{x.id}: registos {fmtNum(x.soma)} para um movimento de {fmtNum(x.valor)}</div>)}
+          <div className="divider" style={{margin:"4px 0"}}/>
+          {linha("= Saldo da app", rc.app, {forte:true})}
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <span className="tag tag-green">No banco: {rc.cont.conciliado}</span>
+            <span className="tag tag-blue">Fora do banco: {rc.cont.fora}</span>
+            <span className="tag tag-amber">Por conciliar: {rc.cont.porConciliar}</span>
+            <span className="tag tag-grey">Isentos: {rc.cont.isento}</span>
+          </div>
+          <div style={{overflowX:"auto"}}><table>
+            <thead><tr><th>Fim de</th><th className="num">Saldo app</th><th className="num">Saldo banco</th><th className="num">Diferença</th></tr></thead>
+            <tbody>{porMes.map(m=><tr key={m.k}><td>{lblK(m.k)}</td><td className="num">{fmtNum(m.app)}</td><td className="num">{fmtNum(m.banco)}</td>
+              <td className="num" style={{color:Math.abs(m.dif)<1?"var(--ok)":"var(--warn)"}}>{Math.abs(m.dif)<1?"—":fmtSinal(m.dif)}</td></tr>)}</tbody>
+          </table></div>
+          <div className="muted" style={{fontSize:12}}>A diferença é o dinheiro registado na app que não passou pelo banco (ou ainda não foi ligado a um movimento).</div>
+        </div>
+      </div>
+      {itens.length>0&&<div>
+        <h3 style={{fontWeight:800,fontSize:15,marginBottom:6}}>Sem movimento do banco ({itens.length})</h3>
+        {itens.slice(0,40).map(x=><div key={x.tipo+x.r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"6px 0",borderBottom:"1px solid var(--line-2)",fontSize:14}}>
+          <span style={{display:"flex",flexDirection:"column",minWidth:0}}><span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{x.tipo} · {x.desc}</span>
+            <span className="muted" style={{fontSize:12}}>{fmtDate(x.data)||"sem data"}{x.r.metodo?` · ${x.r.metodo}`:""}</span></span>
+          <span style={{display:"flex",gap:8,alignItems:"center",flexShrink:0}}><span className="mono">{fmtSinal(x.v)}</span><ConcTag r={x.r} curto/>
+            {!(x.tipo==="Quota"?bloqQ(x.r):bloqD(x.r))&&<button className="btn btn-outline btn-icon btn-sm" onClick={x.abrir} aria-label={`Editar ${x.tipo} ${x.desc}`} title="Editar"><Icon n="edit" s={15}/></button>}</span>
+        </div>)}
+        {itens.length>40&&<div className="muted" style={{fontSize:13,marginTop:6}}>e mais {itens.length-40}.</div>}
+      </div>}
+    </section>;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
      GESTÃO — fecho de período (G4), cópias de segurança (G3), registo (G1)
   ═══════════════════════════════════════════════════════════════ */
   function Gestao() {
@@ -1157,6 +1247,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
         <h1 className="section-hd">Gestão</h1>
         <button className="btn btn-outline" onClick={lerGestao} disabled={gst.carregando}>{gst.carregando?<span className="spinner"/>:<Icon n="refresh" s={16}/>}Actualizar</button>
       </div>
+      {Conciliacao()}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:16,marginBottom:16}}>
         <section className="card" style={{display:"flex",flexDirection:"column",gap:12}}>
           <h2 className="h2" style={{display:"flex",gap:8,alignItems:"center"}}><Icon n="lock" s={18}/>Fecho de período</h2>
@@ -1338,6 +1429,25 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
       </Modal>;
     }
 
+    // Conciliação com o banco (fase 1): canal, movimento do extracto e nota
+    const recCampos = ()=>{
+      if (!temConc && !form._rec) return null;
+      const o = form._rec || {};
+      return <fieldset style={{border:"1.5px solid var(--line-3)",borderRadius:12,padding:"10px 14px 12px",display:"flex",flexDirection:"column",gap:10}}>
+        <legend className="lbl" style={{padding:"0 6px"}}>Conciliação com o banco</legend>
+        {o.idMov&&<div style={{fontSize:13,color:"#3D3832",lineHeight:1.5}}>
+          <b>{o.idMov}</b>{o.dataExtrato?` · ${fmtDate(o.dataExtrato)}`:""}{o.valorMov!=null?` · movimento ${fmtKz(o.valorMov)}`:""}{o.confianca?` · confiança: ${o.confianca}`:""}
+          {o.descExtrato&&<div className="muted" style={{fontSize:12,wordBreak:"break-word"}}>{o.descExtrato}</div>}
+        </div>}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+          <FG label="Canal"><select className="input" value={form.canal||""} onChange={e=>sf("canal")(e.target.value)}>
+            <option value="">— (por conciliar)</option>{[...new Set([...CANAIS,form.canal].filter(Boolean))].map(c=><option key={c}>{c}</option>)}</select></FG>
+          <FG label="Movimento do banco" hint="Ex.: EXT-20260927-401"><input className="input" value={form.idMov||""} onChange={e=>sf("idMov")(e.target.value)}/></FG>
+        </div>
+        <FG label="Nota da conciliação"><input className="input" value={form.notaRec||""} onChange={e=>sf("notaRec")(e.target.value)}/></FG>
+      </fieldset>;
+    };
+
     if (modal==="editQuota") return <Modal title="Editar pagamento de quota" onClose={cm}>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         <FG label="Apartamento" {...ef("apt")}><AptCombo fracoes={fracoesOrd} value={form.fracaoNum} info={aptInfo} onChange={sf("fracaoNum")}/></FG>
@@ -1351,6 +1461,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
         </div>
         {metodoSeg(["Isento"])}
         <FG label="Referência / motivo"><input className="input" value={form.referencia||""} onChange={e=>sf("referencia")(e.target.value)}/></FG>
+        {recCampos()}
         <ModalBtns onCancel={cm} onOk={submitEditQuota} saving={saving} label="Guardar"/>
       </div>
     </Modal>;
@@ -1436,6 +1547,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
             <FG label="Data" {...ef("data")}><input className="input" type="date" value={form.data||""} onChange={e=>sf("data")(e.target.value)}/></FG>
           </div>
           {metodoSeg()}
+          {form._row&&recCampos()}
           <ModalBtns onCancel={cm} onOk={submitPagContrib} saving={saving} label={form._row?"Guardar":`Registar${+form.valor>0?" "+fmtKz(+form.valor):""}`}/>
         </div>
       </Modal>;
@@ -1482,6 +1594,7 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
         <FG label="Categoria" {...ef("categoria")}><select className="input" value={form.categoria||""} onChange={e=>sf("categoria")(e.target.value)}><option value="">Escolha…</option>{[...new Set([...CATS,form.categoria].filter(Boolean))].map(c=><option key={c}>{c}</option>)}</select></FG>
         <FG label="Fornecedor (opcional)"><input className="input" value={form.fornecedor||""} onChange={e=>sf("fornecedor")(e.target.value)}/></FG>
         <FG label="Observações (opcional)"><input className="input" value={form.observacoes||""} onChange={e=>sf("observacoes")(e.target.value)}/></FG>
+        {recCampos()}
         <ModalBtns onCancel={cm} onOk={submitDespesa} saving={saving} label={form._row?"Guardar":`Registar${+form.valor>0?" "+fmtKz(+form.valor):""}`}/>
       </div>
     </Modal>;

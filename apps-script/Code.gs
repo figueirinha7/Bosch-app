@@ -1,8 +1,20 @@
 // ═══════════════════════════════════════════════════════════════
-//  CONDOMÍNIO — Google Apps Script API  v7
+//  CONDOMÍNIO — Google Apps Script API  v7.5
 //  Cole este código em: script.google.com → projecto ligado ao Sheets
 //  Depois: Implementar → Gerir implementações → editar → Nova versão
 //          (Executar como: Eu · Acesso: Qualquer pessoa)
+//
+//  NOVO NA v7.5 — CONCILIAÇÃO COM O BANCO (fase 1)
+//  • Lê as colunas de reconciliação das abas Quotas, Pgtos. Contribuições e
+//    Despesas (id_movimento, data_extrato, descricao_extrato,
+//    valor_movimento_kz, canal, confianca, nota_reconciliacao). Só seguem
+//    para o gestor: as descrições têm NIBs e nomes.
+//  • canal: Banco, Numerário, Gestor anterior, Isento, Acerto (os valores
+//    antigos "Sebastião" e "Isento (app)" são lidos como Gestor anterior e
+//    Isento). Pagamentos registados em Numerário ficam com canal Numerário.
+//  • CORRECÇÃO: uma coluna que não existe na aba passa a ser criada no fim
+//    (antes usava a posição por omissão, que podia ser outra coluna — ex.:
+//    exclui_quota a escrever por cima de observacoes na aba Fracções).
 //
 //  NOVO NA v7
 //  • Apartamentos inactivos (A2): fracao_ativa passa a poder ser editada
@@ -59,7 +71,7 @@
 //  • Editar e apagar lançamentos (quotas, contribuições, despesas, avisos).
 // ═══════════════════════════════════════════════════════════════
 
-const VERSAO         = "v7";
+const VERSAO         = "v7.5";
 const SS             = SpreadsheetApp.getActiveSpreadsheet();
 const PROPS          = PropertiesService.getScriptProperties();
 const SESSAO_HORAS   = 8;   // duração de uma sessão de gestor
@@ -77,6 +89,16 @@ const ABA = {
   QVAL:     "💲 Valor da Quota",
 };
 
+// Colunas de reconciliação com o extracto bancário (iguais nas três abas de movimentos)
+const CAMPOS_REC = {
+  idMov:        ["id_movimento", null],
+  dataExtrato:  ["data_extrato", null],
+  descExtrato:  ["descricao_extrato", null],
+  valorMov:     ["valor_movimento_kz", null],
+  canal:        ["canal", null],
+  confianca:    ["confianca", null],
+  notaRec:      ["nota_reconciliacao", null],
+};
 // Esquema de colunas de cada aba: campo → [cabeçalho, coluna por omissão].
 // A coluna é procurada pelo nome do cabeçalho (com ou sem *); se não existir
 // usa a posição por omissão. Coluna null = criada no fim quando necessária.
@@ -105,6 +127,7 @@ const ESQUEMA = {
     metodo:        ["metodo_pagamento", 6],
     referencia:    ["referencia_doc", 7],
     observacoes:   ["observacoes", 8],
+    ...CAMPOS_REC,
   }},
   CONTRIB: { aba: ABA.CONTRIB, hdr: 4, campos: {
     titulo:         ["titulo", 1],
@@ -126,6 +149,7 @@ const ESQUEMA = {
     referencia:          ["referencia_doc", 6],
     observacoes:         ["observacoes", 7],
     contribuicao_id:     ["contribuicao_id", null],
+    ...CAMPOS_REC,
   }},
   DESPESAS: { aba: ABA.DESPESAS, hdr: 4, campos: {
     data:        ["data", 1],
@@ -136,6 +160,7 @@ const ESQUEMA = {
     numFatura:   ["num_fatura", 6],
     pagoPor:     ["pago_por", 7],
     observacoes: ["observacoes", 8],
+    ...CAMPOS_REC,
   }},
   AVISOS: { aba: ABA.AVISOS, hdr: 4, campos: {
     tipo:     ["tipo", 1],
@@ -153,7 +178,38 @@ const ESQUEMA = {
 };
 
 // Campos gravados como número
-const CAMPOS_NUM = ["valor", "mes", "ano", "valorPorFracao", "valorTotal"];
+const CAMPOS_NUM = ["valor", "mes", "ano", "valorPorFracao", "valorTotal", "valorMov"];
+
+// Valores de canal: os antigos passam para a lista fixa
+function normCanal(v) {
+  const s = String(v || "").trim();
+  const l = s.toLowerCase();
+  if (!s) return "";
+  if (l === "sebastião" || l === "sebastiao" || l === "gestor anterior") return "Gestor anterior";
+  if (l.indexOf("isento") === 0) return "Isento";
+  if (l === "numerário" || l === "numerario") return "Numerário";
+  if (l === "banco") return "Banco";
+  if (l === "acerto") return "Acerto";
+  return s;
+}
+// Canal de um pagamento novo: Numerário fica logo marcado; os outros ficam "por conciliar"
+function canalNovo(data) {
+  if (data.canal) return normCanal(data.canal);
+  return data.metodo === "Numerário" ? "Numerário" : undefined;
+}
+// Lê as colunas de reconciliação de uma linha (objecto de sheetToObjects)
+function lerRec(o) {
+  const vm = o["valor_movimento_kz"];
+  return {
+    idMov:       String(o["id_movimento"] || "").trim(),
+    dataExtrato: o["data_extrato"] || "",
+    descExtrato: o["descricao_extrato"] || "",
+    valorMov:    vm === "" || vm === undefined ? null : num(vm),
+    canal:       normCanal(o["canal"]),
+    confianca:   o["confianca"] || "",
+    notaRec:     o["nota_reconciliacao"] || "",
+  };
+}
 
 
 // ── RESPOSTA JSON ────────────────────────────────────────────────
@@ -223,8 +279,9 @@ function resolverColunas(esq, sheet, criar) {
     const [nome, def] = esq.campos[k];
     const i = headers.indexOf(nome);
     if (i >= 0) cols[k] = i + 1;
-    else if (def) cols[k] = def;
+    // Coluna em falta: cria-a no fim (nunca escreve na posição por omissão se lá estiver outra coluna)
     else if (criar) cols[k] = ensureColumn(sheet, esq.hdr, nome);
+    else if (def && !headers[def - 1]) cols[k] = def;
   });
   return cols;
 }
@@ -475,6 +532,7 @@ function lerDados() {
         metodo:      q["metodo_pagamento"] || "",
         referencia:  q["referencia_doc"] || "",
         observacoes: q["observacoes"] || "",
+        ...lerRec(q),
         _row:        q._row,
         _sig:        q._sig,
       };
@@ -517,6 +575,7 @@ function lerDados() {
         valor:          num(p["valor_kz*"] || p["valor_kz"]),
         metodo:         p["metodo_pagamento"] || "",
         referencia:     p["referencia_doc"] || "",
+        ...lerRec(p),
         _row:           p._row,
         _sig:           p._sig,
       };
@@ -533,6 +592,7 @@ function lerDados() {
       fornecedor:  d["fornecedor"] || "",
       numFatura:   d["num_fatura"] || "",
       observacoes: d["observacoes"] || "",
+      ...lerRec(d),
       _row:        d._row,
       _sig:        d._sig,
     }));
@@ -963,6 +1023,7 @@ function executarAccao(action, data) {
         fracao_numero: data.fracao_numero, data: data.data || hoje(), valor: m.valor,
         mes: m.mes, ano: m.ano, metodo: data.metodo || "",
         referencia: data.referencia || "", observacoes: data.observacoes || "",
+        canal: canalNovo(data),
       })));
       return { ok: true, row, count: meses.length };
     }
@@ -977,7 +1038,7 @@ function executarAccao(action, data) {
 
     case "edit_pagamento_quota": {
       if (data.mes !== undefined) exigir(data.mes >= 1 && data.mes <= 12, "Mês inválido");
-      const row = editar("QUOTAS", data, ["fracao_numero", "data", "valor", "mes", "ano", "metodo", "referencia", "observacoes"], validarAberto(data));
+      const row = editar("QUOTAS", data, ["fracao_numero", "data", "valor", "mes", "ano", "metodo", "referencia", "observacoes", "canal", "idMov", "notaRec"], validarAberto(data));
       return { ok: true, row };
     }
 
@@ -1063,6 +1124,7 @@ function executarAccao(action, data) {
         contribuicao_titulo: c.titulo, contribuicao_id: c.id,
         fracao_numero: data.fracao_numero, data: data.data || hoje(), valor: data.valor || 0,
         metodo: data.metodo || "", referencia: data.referencia || "", observacoes: data.observacoes || "",
+        canal: canalNovo(data),
       }]);
       return { ok: true, row };
     }
@@ -1077,13 +1139,14 @@ function executarAccao(action, data) {
         contribuicao_titulo: c.titulo, contribuicao_id: c.id,
         fracao_numero: n, data: data.data || hoje(), valor: data.valor_por_fracao || 0,
         metodo: data.metodo || "", referencia: "", observacoes: "",
+        canal: canalNovo(data),
       })));
       return { ok: true, row, count: numeros.length };
     }
 
     case "edit_pagamento_contribuicao": {
       if (data.contribuicao_id !== undefined) data.contribuicao_titulo = contribPorId(data.contribuicao_id).titulo;
-      const row = editar("PGC", data, ["contribuicao_id", "contribuicao_titulo", "fracao_numero", "data", "valor", "metodo", "referencia", "observacoes"], validarAberto(data));
+      const row = editar("PGC", data, ["contribuicao_id", "contribuicao_titulo", "fracao_numero", "data", "valor", "metodo", "referencia", "observacoes", "canal", "idMov", "notaRec"], validarAberto(data));
       return { ok: true, row };
     }
 
@@ -1099,12 +1162,13 @@ function executarAccao(action, data) {
         data: data.data, valor: data.valor, descricao: data.descricao, categoria: data.categoria || "Outros",
         fornecedor: data.fornecedor || "", numFatura: data.numFatura || "",
         pagoPor: data.pagoPor || "", observacoes: data.observacoes || "",
+        canal: data.canal ? normCanal(data.canal) : undefined,
       }]);
       return { ok: true, row };
     }
 
     case "edit_despesa":
-      return { ok: true, row: editar("DESPESAS", data, ["data", "valor", "descricao", "categoria", "fornecedor", "numFatura", "observacoes"], validarAberto(data)) };
+      return { ok: true, row: editar("DESPESAS", data, ["data", "valor", "descricao", "categoria", "fornecedor", "numFatura", "observacoes", "canal", "idMov", "notaRec"], validarAberto(data)) };
 
     case "delete_despesa":
       return { ok: true, row: apagar("DESPESAS", data, validarAberto()) };

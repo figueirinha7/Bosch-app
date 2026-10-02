@@ -3,6 +3,18 @@
 Lista de trabalho da app (Vercel, endereço oficial: bosch-app.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
+## 🧪 v7.5 (branch `beta`, ainda não no `main`) — conciliação com o banco, fase 1
+
+**Mexe no Apps Script:** colar o novo `Code.gs` na folha e publicar *Nova versão* (beta primeiro; real só antes do merge).
+
+- Lê as colunas de reconciliação (`id_movimento`, `data_extrato`, `descricao_extrato`, `valor_movimento_kz`, `canal`, `confianca`, `nota_reconciliacao`) das abas de quotas, pagamentos de contribuições e despesas. **Só para o gestor** (as descrições têm NIBs e nomes); a página pública não as recebe.
+- `canal`: Banco, Numerário, Gestor anterior, Isento, Acerto ("Sebastião" e "Isento (app)" são lidos como Gestor anterior e Isento). Pagamentos registados em Numerário ficam logo com canal Numerário.
+- Estado de cada registo: **no banco** (tem movimento), **fora do banco** (numerário, gestor anterior, acerto), **por conciliar**, isento. Sinal no histórico de quotas (com filtro), no detalhe de cada mês, nos pagamentos de contribuições e nas despesas; ponto laranja no mapa de quotas nos meses por conciliar.
+- Editar um pagamento ou despesa permite mudar o canal, o movimento do banco e a nota.
+- *Gestão → Conciliação com o banco*: saldo no banco pelos movimentos ligados + entradas/despesas sem movimento + movimentos partilhados = saldo da app; comparação mês a mês (últimos 12 meses); lista do que está sem movimento.
+- **Correcção:** uma coluna que não existe numa aba passa a ser criada no fim, em vez de se usar a posição por omissão. Na folha beta a aba Fracções não tem `exclui_quota` e a app escrevia por cima de `observacoes`. **Confirmar se a folha real tem a coluna `exclui_quota`.**
+- Verificado com a folha beta e o extracto: 407 movimentos ligados; saldo do banco reconstruído = 352 390 (igual ao extracto, também em Dez/2025 e Ago/2026); diferença de 35 000 = quotas da fracção 32 em numerário.
+
 ## 🧪 v7.4 (branch `beta`, ainda não no `main`) — nome do responsável pelo pagamento
 
 - Nos ecrãs de cobrança aparece o **responsável**: o inquilino, se existir; senão, o proprietário. Painel (A cobrar e detalhes), Quotas (mapa, histórico, detalhe do mês), escolha do apartamento ao registar, Contribuições (pagamentos, lançar para vários, quem não participa), recibo e lista de atrasos.
@@ -156,6 +168,9 @@ Próximos sugeridos: 1) A5, G5 (pequenos) · 2) C5, D2, F1 · 3) B3, E1–E4 · 
 - ✅ **A3. Detalhe em todos os números do painel**: tocar em cobrança, saldo em caixa, despesas, etc. abre a lista que dá origem ao valor.
 - ✅ **A4. Estados coerentes em toda a app** (activo / inactivo / sem quota mensal) no painel, grelhas, relatórios, página pública e lembretes.
 - **A5. Multa por atraso** (`multa_atraso_pct`): calcular e mostrar separada da quota.
+- **A8. Conciliação com o banco — fases 2 e 3** (fase 1 na v7.5). Decisões tomadas: chave dos movimentos = `NUM. DOC.` do extracto (o `NUM. OPER.` não é único); livro de NIBs importado na fase 3 (de `Etapa2_Livro_de_IBANs_v3.xlsx`); canal com lista fixa; fracção 0 mantém os "recebimentos não identificados".
+  - **Fase 2 (~15–20% da v7):** importar o extracto (.xlsx "Movimentos", cabeçalho na linha 7) para uma aba "🏦 Extracto" sem duplicar; converter os `id_movimento` antigos (`EXT-AAAAMMDD-NNN`) para `NUM. DOC.`; lista de movimentos por identificar; comparação com o SALDO do extracto.
+  - **Fase 3 (~25–30% da v7):** aba "🔗 NIBs" (NIB/nome → apartamento ou grupo: 0/6/8/9, 4/5, 24/25, 26/27, 34/35) que a app aprende; propostas de correspondência (ligar a registos existentes, criar em falta, mostrar registos sem movimento), também para despesas.
 - **A7. Histórico do apartamento**: registar entradas e saídas de inquilinos (e mudanças de proprietário) com datas, e saber quem era o responsável em cada mês (para recibos, extractos e dívidas antigas). Por desenhar.
 - **A6. Data real da última alteração no cabeçalho público**: hoje "Actualizado …" mostra a hora da leitura (o script devolve `new Date()` em cada pedido), por isso aparece sempre a data do dia. Passar a mostrar quando a folha foi alterada pela última vez (data de modificação do ficheiro no Drive, inclui edições à mão) com o texto "Dados de …"; sem ligação continua "Sem ligação". Mexe no `Code.gs` (nova versão a publicar) e no cabeçalho; ~0,1–0,3 s a mais por leitura. Estimativa: ~3–4% da v7.
 
