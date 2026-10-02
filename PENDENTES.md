@@ -150,6 +150,7 @@ Próximos sugeridos: 1) A5, G5 (pequenos) · 2) C5, D2, F1 · 3) B3, E1–E4 · 
 - ✅ **A3. Detalhe em todos os números do painel**: tocar em cobrança, saldo em caixa, despesas, etc. abre a lista que dá origem ao valor.
 - ✅ **A4. Estados coerentes em toda a app** (activo / inactivo / sem quota mensal) no painel, grelhas, relatórios, página pública e lembretes.
 - **A5. Multa por atraso** (`multa_atraso_pct`): calcular e mostrar separada da quota.
+- **A6. Data real da última alteração no cabeçalho público**: hoje "Actualizado …" mostra a hora da leitura (o script devolve `new Date()` em cada pedido), por isso aparece sempre a data do dia. Passar a mostrar quando a folha foi alterada pela última vez (data de modificação do ficheiro no Drive, inclui edições à mão) com o texto "Dados de …"; sem ligação continua "Sem ligação". Mexe no `Code.gs` (nova versão a publicar) e no cabeçalho; ~0,1–0,3 s a mais por leitura. Estimativa: ~3–4% da v7.
 
 ### B. Regras de quotas
 
