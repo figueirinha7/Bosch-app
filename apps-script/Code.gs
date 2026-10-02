@@ -1,8 +1,17 @@
 // ═══════════════════════════════════════════════════════════════
-//  CONDOMÍNIO — Google Apps Script API  v7.5
+//  CONDOMÍNIO — Google Apps Script API  v7.6
 //  Cole este código em: script.google.com → projecto ligado ao Sheets
 //  Depois: Implementar → Gerir implementações → editar → Nova versão
 //          (Executar como: Eu · Acesso: Qualquer pessoa)
+//
+//  NOVO NA v7.6 — CONCILIAÇÃO COM O BANCO (fase 2)
+//  • Nova aba "🏦 Extracto" (criada na primeira importação): um movimento
+//    do banco por linha, identificado pelo NUM. DOC. (único; o NUM. OPER.
+//    repete-se). Importar o mesmo extracto outra vez não duplica nada.
+//  • converter_ids_movimento: troca os id_movimento antigos
+//    (EXT-AAAAMMDD-NNN, que dependiam da ordem do ficheiro) pelo NUM. DOC.
+//    nas abas de quotas, contribuições e despesas (e no referencia_doc
+//    quando era igual ao id antigo). O id antigo fica na aba Extracto.
 //
 //  NOVO NA v7.5 — CONCILIAÇÃO COM O BANCO (fase 1)
 //  • Lê as colunas de reconciliação das abas Quotas, Pgtos. Contribuições e
@@ -71,7 +80,7 @@
 //  • Editar e apagar lançamentos (quotas, contribuições, despesas, avisos).
 // ═══════════════════════════════════════════════════════════════
 
-const VERSAO         = "v7.5";
+const VERSAO         = "v7.6";
 const SS             = SpreadsheetApp.getActiveSpreadsheet();
 const PROPS          = PropertiesService.getScriptProperties();
 const SESSAO_HORAS   = 8;   // duração de uma sessão de gestor
@@ -87,6 +96,7 @@ const ABA = {
   DESPESAS: "🧾 Despesas",
   AVISOS:   "📢 Avisos",
   QVAL:     "💲 Valor da Quota",
+  EXT:      "🏦 Extracto",
 };
 
 // Colunas de reconciliação com o extracto bancário (iguais nas três abas de movimentos)
@@ -352,6 +362,27 @@ function ensureAvisosSheet() {
 
 
 // ── ABA VALOR DA QUOTA (cria se não existir) ─────────────────────
+// ── ABA EXTRACTO (cria se não existir) ───────────────────────────
+const EXT_COLS = ["num_doc", "data_mov", "data_valor", "pedido_num", "num_oper", "descricao", "valor_kz", "saldo_kz", "id_antigo", "importado_em"];
+function ensureExtractoSheet() {
+  let sheet = SS.getSheetByName(ABA.EXT);
+  if (!sheet) {
+    sheet = SS.insertSheet(ABA.EXT);
+    sheet.getRange(1, 1).setValue("Movimentos do extracto bancário importados pela app (não editar à mão)").setFontWeight("bold");
+    sheet.getRange(2, 1).setValue("Chave: num_doc (NUM. DOC. do banco). id_antigo = identificador usado antes (EXT-AAAAMMDD-NNN).");
+    sheet.getRange(4, 1, 1, EXT_COLS.length).setValues([EXT_COLS]).setFontWeight("bold");
+    sheet.getRange(5, 1, 1000, 5).setNumberFormat("@");   // num_doc, datas e números do banco como texto
+  }
+  return sheet;
+}
+function readExtracto() {
+  return sheetToObjects(ABA.EXT).filter(m => m["num_doc"]).map(m => ({
+    numDoc: String(m["num_doc"]).trim(), dataMov: m["data_mov"] || "", dataValor: m["data_valor"] || "",
+    pedido: m["pedido_num"] || "", numOper: m["num_oper"] || "", descricao: m["descricao"] || "",
+    valor: num(m["valor_kz"]), saldo: m["saldo_kz"] === "" ? null : num(m["saldo_kz"]), idAntigo: m["id_antigo"] || "",
+  }));
+}
+
 function ensureQuotaSheet() {
   let sheet = SS.getSheetByName(ABA.QVAL);
   if (!sheet) {
@@ -640,6 +671,7 @@ function lerDados() {
     pagamentosContribuicao: pagContribNorm,
     despesas:               despesasNorm,
     avisos:                 avisosNorm,
+    extracto:               readExtracto(),
   };
 }
 
@@ -847,6 +879,24 @@ const LOG = { antes: null, aba: "", linha: "" };
 const ABA_REGISTO = "🗒️ Registo";
 const SEM_REGISTO = ["get_registo", "list_copias"];
 
+// Troca valores numa coluna (por cabeçalho) de uma aba, de uma só vez. mapa: {antigo: novo}
+function trocarNaColuna(nomeAba, hdr, cabecalho, mapa, soSeIgualA) {
+  const sh = SS.getSheetByName(nomeAba);
+  if (!sh || sh.getLastRow() <= hdr) return 0;
+  const col = headersOf(sh, hdr).indexOf(cabecalho) + 1;
+  if (!col) return 0;
+  const n = sh.getLastRow() - hdr;
+  const rg = sh.getRange(hdr + 1, col, n, 1);
+  const v = rg.getValues();
+  let mud = 0;
+  for (let i = 0; i < n; i++) {
+    const k = String(v[i][0]).trim();
+    if (k && mapa[k] !== undefined) { v[i][0] = mapa[k]; mud++; }
+  }
+  if (mud) { rg.setNumberFormat("@"); rg.setValues(v); }
+  return mud;
+}
+
 function registar(action, data, res) {
   try {
     let sheet = SS.getSheetByName(ABA_REGISTO);
@@ -857,6 +907,9 @@ function registar(action, data, res) {
     }
     const limpo = {};
     Object.keys(data || {}).forEach(k => { if (k !== "_sig" && k !== "password") limpo[k] = data[k]; });
+    // Importações grandes: no registo fica só o resumo
+    if (Array.isArray(limpo.movimentos)) limpo.movimentos = limpo.movimentos.length + " movimentos";
+    if (limpo.mapa && typeof limpo.mapa === "object") limpo.mapa = Object.keys(limpo.mapa).length + " identificadores";
     const corta = s => s.length > 40000 ? s.slice(0, 40000) + "…" : s;
     sheet.appendRow([
       Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"),
@@ -1192,6 +1245,51 @@ function executarAccao(action, data) {
       return { ok: true, row: apagar("AVISOS", data) };
 
     // ── GESTÃO: fecho de período, registo, cópias (G1, G3, G4) ──
+    // ── CONCILIAÇÃO: importar extracto (fase 2) ─────────────────
+    // movimentos = [{numDoc, dataMov, dataValor, pedido, numOper, descricao, valor, saldo, idAntigo}]
+    case "importar_extracto": {
+      const movs = data.movimentos || [];
+      exigir(movs.length > 0, "O ficheiro não tem movimentos");
+      movs.forEach(m => exigir(String(m.numDoc || "").trim(), "Há movimentos sem NUM. DOC."));
+      const sh = ensureExtractoSheet();
+      const existentes = {};
+      readExtracto().forEach(m => { existentes[m.numDoc] = true; });
+      const agora = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm");
+      const novos = movs.filter(m => !existentes[String(m.numDoc).trim()]);
+      if (novos.length) {
+        const linhas = novos.map(m => [String(m.numDoc).trim(), m.dataMov || "", m.dataValor || "", String(m.pedido || ""), String(m.numOper || ""),
+          m.descricao || "", Number(m.valor) || 0, m.saldo === null || m.saldo === undefined ? "" : Number(m.saldo), m.idAntigo || "", agora]);
+        const ini = nextEmptyRow(sh, 5);
+        sh.getRange(ini, 1, linhas.length, 5).setNumberFormat("@");
+        sh.getRange(ini, 1, linhas.length, EXT_COLS.length).setValues(linhas);
+      }
+      LOG.aba = ABA.EXT;
+      return { ok: true, novos: novos.length, repetidos: movs.length - novos.length };
+    }
+
+    // mapa = {"EXT-20240919-002": "259282390", ...}
+    case "converter_ids_movimento": {
+      const mapa = data.mapa || {};
+      exigir(Object.keys(mapa).length > 0, "Nada para converter");
+      Object.keys(mapa).forEach(k => exigir(/^EXT-\d{8}-\d+$/.test(k) && String(mapa[k]).trim(), "Identificador inválido: " + k));
+      const res = {};
+      [[ABA.QUOTAS, 4], [ABA.PGC, 4], [ABA.DESPESAS, 4]].forEach(([aba, hdr]) => {
+        res[aba] = trocarNaColuna(aba, hdr, "id_movimento", mapa) + trocarNaColuna(aba, hdr, "referencia_doc", mapa);
+      });
+      // Guarda o id antigo na aba Extracto
+      const sh = SS.getSheetByName(ABA.EXT);
+      if (sh && sh.getLastRow() >= 5) {
+        const inv = {}; Object.keys(mapa).forEach(k => { inv[String(mapa[k]).trim()] = k; });
+        const n = sh.getLastRow() - 4;
+        const docs = sh.getRange(5, 1, n, 1).getValues(), ant = sh.getRange(5, 9, n, 1).getValues();
+        let mud = false;
+        for (let i = 0; i < n; i++) { const d = String(docs[i][0]).trim(); if (inv[d] && !ant[i][0]) { ant[i][0] = inv[d]; mud = true; } }
+        if (mud) sh.getRange(5, 9, n, 1).setValues(ant);
+      }
+      LOG.antes = { convertidos: Object.keys(mapa).length };
+      return { ok: true, linhas: res };
+    }
+
     case "set_fecho": {
       const ate = String(data.ate || "").trim();
       exigir(!ate || /^\d{4}-\d{2}$/.test(ate), "Mês inválido");

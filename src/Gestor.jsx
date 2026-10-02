@@ -5,7 +5,7 @@ import { MESES, MESES_S, CATS, AVISO_TIPOS, METODOS, ESTADOS_CONTRIB, today, cha
   quotaInfo, estadoMes, nivelAtraso, contribInfo, contribFechada, ordenarContribs, metaContrib, situacaoApt, intervaloMeses, alocar, resumoMeses,
   fluxoMensal, contaMes, serieMeses, cobrancaMes, rascunhoGet, rascunhoSet, msgRecibo, nomeResp, nomeOutro,
   inativa, semQuota, quotaDoMes, quotaAtual, historicoQuota, mesCaixaQuota, fmtDateTime,
-  CANAIS, estadoConc, temConciliacao, resumoConciliacao } from "./lib.js";
+  CANAIS, estadoConc, temConciliacao, resumoConciliacao, lerExtracto, mapaIdsAntigos, saldoExtracto, movimentosPorIdentificar } from "./lib.js";
 import { Icon, WaSvg, Modal, FG, CheckRow, Warn, Info, ModalBtns, RowActions, MesSelect, AnoSelect, Segmented,
   MesNav, Menu, AptCombo, ConfirmModal, Toast } from "./ui.jsx";
 import { AvisoCard } from "./Publico.jsx";
@@ -149,7 +149,8 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
   const [verDivida,setVerDivida]=useState(false);
   const [kpiDet,setKpiDet]=useState(null);   // A3: "cobranca" | "saldo" | "despesas" (do mês do painel)
   const [recibo,setRecibo]=useState(null);
-  const [gst,setGst]=useState({});   // separador Gestão: {copias, ultima, automatica, registo, erro, carregando}
+  const [gst,setGst]=useState({});
+  const [impExt,setImpExt]=useState(null);   // pré-visualização da importação do extracto (fase 2)   // separador Gestão: {copias, ultima, automatica, registo, erro, carregando}
   const [fecho,setFecho]=useState(()=>{ const d=new Date(anoAtual, mesAtual-2, 1); return {ano:d.getFullYear(), mes:d.getMonth()+1}; });
 
   const { config, fracoes, pagamentosQuota, contribuicoes, pagamentosContribuicao, despesas, avisos=[] } = appData;
@@ -176,6 +177,39 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
       ...(rg.status==="fulfilled"?{registo:rg.value.registo}:{erroRegisto:rg.reason?.message}) });
   };
   useEffect(()=>{ if (tab==="gestao") lerGestao(); },[tab]); // eslint-disable-line
+  // Fase 2 — importar o extracto do banco (.xlsx "Movimentos")
+  const escolherExtracto = async (ev)=>{
+    const file = ev.target.files?.[0]; ev.target.value = "";
+    if (!file) return;
+    try {
+      const { default: readXlsxFile } = await import("read-excel-file/browser");
+      const folhas = await readXlsxFile(file);
+      const linhas = Array.isArray(folhas) && folhas[0]?.data ? folhas[0].data : folhas;
+      const ex = lerExtracto(linhas);
+      if (ex.erro) return showToast({ok:false,msg:ex.erro});
+      const ja = new Set((appData.extracto||[]).map(m=>String(m.numDoc)));
+      const mp = mapaIdsAntigos(appData, ex.movimentos);
+      const inv = {}; Object.entries(mp.mapa).forEach(([k,v])=>{ inv[v]=k; });
+      const movs = ex.movimentos.map(m=>({...m, idAntigo: inv[m.numDoc]||""}));
+      setImpExt({ nome:file.name, conta:ex.conta, movs, novos:movs.filter(m=>!ja.has(m.numDoc)).length, mp,
+        de:movs[0]?.dataMov, ate:movs[movs.length-1]?.dataMov, saldo:saldoExtracto(movs) });
+    } catch(e) { showToast({ok:false,msg:"Não foi possível ler o ficheiro: "+e.message}); }
+  };
+  const importarExtracto = async ()=>{
+    const x = impExt; setSaving(true);
+    try {
+      const r1 = await apiPost(apiUrl,"importar_extracto",{movimentos:x.movs.map(({ordem,...m})=>m)},token);
+      let conv = "";
+      if (Object.keys(x.mp.mapa).length) {
+        await apiPost(apiUrl,"converter_ids_movimento",{mapa:x.mp.mapa},token);
+        conv = ` · ${Object.keys(x.mp.mapa).length} identificadores convertidos para NUM. DOC.`;
+      }
+      setSaving(false); setImpExt(null);
+      showToast({ok:true,msg:`Extracto importado: ${r1.novos} movimentos novos${r1.repetidos?`, ${r1.repetidos} já existiam`:""}${conv}`});
+      onReload();
+    } catch(e) { setSaving(false); if (e.code==="AUTH") return onExpired(); showToast({ok:false,msg:e.message}); }
+  };
+
 
   const sf = k=>v=>{ setForm(p=>({...p,[k]:v})); setErrs(e=>e[k]?{...e,[k]:undefined}:e); };
   const om = (type,d={})=>{ setModal(type); setForm({data:today(),...d}); setErrs({}); };
@@ -527,6 +561,21 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
       {cel&&CelModal()}
       {verDivida&&DividaModal()}
       {kpiDet&&KpiModal()}
+      {impExt&&<Modal title="Importar extracto do banco" onClose={()=>!saving&&setImpExt(null)}>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div style={{fontSize:14,lineHeight:1.6}}>
+            <div><b>{impExt.nome}</b>{impExt.conta?` · ${impExt.conta}`:""}</div>
+            <div>{impExt.movs.length} movimentos, de {fmtDate(impExt.de)} a {fmtDate(impExt.ate)}{impExt.saldo?` · saldo final ${fmtKz(impExt.saldo.saldo)}`:""}</div>
+          </div>
+          <div style={{background:"var(--surface-2)",border:"1px solid var(--line)",borderRadius:12,padding:"10px 14px",fontSize:15,display:"flex",flexDirection:"column",gap:4}}>
+            <span><b>{impExt.novos}</b> movimentos novos {impExt.movs.length-impExt.novos>0&&<span className="muted">· {impExt.movs.length-impExt.novos} já importados (ficam como estão)</span>}</span>
+            {impExt.mp.total>0&&<span><b>{Object.keys(impExt.mp.mapa).length}</b> de {impExt.mp.total} identificadores antigos (EXT-…) passam a usar o NUM. DOC. do banco</span>}
+            {impExt.mp.falham.length>0&&<span style={{color:"var(--warn)"}}>{impExt.mp.falham.length} identificadores antigos não correspondem a este ficheiro e ficam como estão: {impExt.mp.falham.slice(0,4).join(", ")}{impExt.mp.falham.length>4?"…":""}</span>}
+          </div>
+          <Info>Os movimentos ficam na aba "🏦 Extracto" da folha. Os pagamentos e despesas não são alterados{Object.keys(impExt.mp.mapa).length?", excepto a troca do identificador do movimento":""}.</Info>
+          <ModalBtns onCancel={()=>setImpExt(null)} onOk={importarExtracto} saving={saving} label={impExt.novos||Object.keys(impExt.mp.mapa).length?"Importar":"Nada a importar"}/>
+        </div>
+      </Modal>}
       {Formularios()}
     </div>
   );
@@ -1171,13 +1220,18 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
                     + diferenças em movimentos partilhados
   ═══════════════════════════════════════════════════════════════ */
   function Conciliacao() {
-    if (!temConc) return <section className="card" style={{marginBottom:16}}>
+    if (!temConc && !(appData.extracto||[]).length) return <section className="card" style={{marginBottom:16}}>
       <h2 className="h2" style={{marginBottom:4}}>Conciliação com o banco</h2>
       <div className="muted" style={{fontSize:14,lineHeight:1.5}}>A folha ainda não tem as colunas de reconciliação (<code>id_movimento</code>, <code>canal</code>, …) nas abas de quotas, contribuições e despesas. Quando tiver, aparece aqui a comparação com o banco.</div>
     </section>;
     const rc = resumoConciliacao(appData);
+    const extracto = appData.extracto||[];
+    const ext = saldoExtracto(extracto);
+    const rcExt = ext ? resumoConciliacao(appData, ext.data.slice(0,7)) : null;
+    const extBate = ext && Math.abs(ext.saldo - rcExt.banco) < 1;
+    const porIdent = movimentosPorIdentificar(appData);
     const meses = []; { let y=anoAtual, m=mesAtual; for(let i=0;i<12;i++){ meses.push(chaveMes(y,m)); m--; if(m<1){m=12;y--;} } }
-    const porMes = meses.map(k=>{ const x=resumoConciliacao(appData,k); return { k, app:x.app, banco:x.banco, dif:x.app-x.banco }; });
+    const porMes = meses.map(k=>{ const x=resumoConciliacao(appData,k); return { k, app:x.app, banco:x.banco, dif:x.app-x.banco, ext:saldoExtracto(extracto,k)?.saldo }; });
     const lblK = k => `${MESES_S[+k.slice(5,7)-1]} ${k.slice(0,4)}`;
     const itens = [
       ...pagamentosQuota.map(p=>({ r:p, tipo:"Quota", data:p.data, desc:`${aptById(p.fracaoId)?.numero||"?"} · ${p.mes?MESES_S[p.mes-1]+" "+p.ano:""}`, v:p.valor, abrir:()=>abrirEditQuota(p) })),
@@ -1186,7 +1240,16 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
     ].map(x=>({...x, e:estadoConc(x.r)})).filter(x=>x.e.k==="porConciliar"||x.e.k==="fora").sort((a,b)=>(b.data||"").localeCompare(a.data||""));
     const linha = (l, v, o={}) => <div style={{display:"flex",justifyContent:"space-between",gap:12,padding:"5px 0",fontSize:15,fontWeight:o.forte?800:400}}><span>{l}</span><span className="mono" style={{color:o.cor,whiteSpace:"nowrap"}}>{o.sinal?fmtSinal(v):fmtKz(v)}</span></div>;
     return <section className="card" style={{marginBottom:16,display:"flex",flexDirection:"column",gap:14}}>
-      <h2 className="h2" style={{display:"flex",gap:8,alignItems:"center"}}><Icon n="checkCircle" s={18}/>Conciliação com o banco</h2>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+        <h2 className="h2" style={{display:"flex",gap:8,alignItems:"center"}}><Icon n="checkCircle" s={18}/>Conciliação com o banco</h2>
+        <label className="btn btn-outline" style={{cursor:"pointer"}}><Icon n="download" s={16}/>Importar extracto (.xlsx)
+          <input type="file" accept=".xlsx" onChange={escolherExtracto} style={{display:"none"}}/></label>
+      </div>
+      {ext&&<div className={`banner ${extBate?"":"banner-warn"}`} style={extBate?{background:"var(--ok-bg)",color:"var(--ok)"}:undefined}>
+        <Icon n={extBate?"checkCircle":"alert"} s={18}/>
+        <span style={{flex:1}}>Saldo no extracto a {fmtDate(ext.data)}: <b className="mono">{fmtKz(ext.saldo)}</b>
+          {extBate?" — igual ao saldo pelos movimentos ligados.":` — os movimentos ligados dão ${fmtKz(rcExt.banco)} (diferença ${fmtSinal(ext.saldo-rcExt.banco)} Kz).`}</span>
+      </div>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(300px,1fr))",gap:16}}>
         <div style={{background:"var(--surface-2)",border:"1px solid var(--line)",borderRadius:12,padding:"8px 16px"}}>
           {linha(<b>Saldo no banco (movimentos ligados)</b>, rc.banco, {forte:true})}
@@ -1206,15 +1269,27 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
             <span className="tag tag-grey">Isentos: {rc.cont.isento}</span>
           </div>
           <div style={{overflowX:"auto"}}><table>
-            <thead><tr><th>Fim de</th><th className="num">Saldo app</th><th className="num">Saldo banco</th><th className="num">Diferença</th></tr></thead>
+            <thead><tr><th>Fim de</th><th className="num">Saldo app</th><th className="num">Saldo banco</th>{extracto.length>0&&<th className="num">Extracto</th>}<th className="num">Diferença</th></tr></thead>
             <tbody>{porMes.map(m=><tr key={m.k}><td>{lblK(m.k)}</td><td className="num">{fmtNum(m.app)}</td><td className="num">{fmtNum(m.banco)}</td>
+              {extracto.length>0&&<td className="num" style={{color:m.ext==null?"var(--ink-3)":Math.abs(m.ext-m.banco)<1?"var(--ok)":"var(--divida)"}} title={m.ext!=null&&Math.abs(m.ext-m.banco)>=1?`Diferença para os movimentos ligados: ${fmtSinal(m.ext-m.banco)}`:undefined}>{m.ext==null?"—":fmtNum(m.ext)}</td>}
               <td className="num" style={{color:Math.abs(m.dif)<1?"var(--ok)":"var(--warn)"}}>{Math.abs(m.dif)<1?"—":fmtSinal(m.dif)}</td></tr>)}</tbody>
           </table></div>
           <div className="muted" style={{fontSize:12}}>A diferença é o dinheiro registado na app que não passou pelo banco (ou ainda não foi ligado a um movimento).</div>
         </div>
       </div>
+      {extracto.length>0&&<div>
+        <h3 style={{fontWeight:800,fontSize:15,marginBottom:6}}>Movimentos do extracto por identificar ({porIdent.length})</h3>
+        {porIdent.length===0&&<div style={{color:"var(--ok)",fontWeight:700,fontSize:14}}>Todos os {extracto.length} movimentos importados estão ligados a registos da app.</div>}
+        {porIdent.slice(0,40).map(m=><div key={m.numDoc} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"6px 0",borderBottom:"1px solid var(--line-2)",fontSize:14}}>
+          <span style={{display:"flex",flexDirection:"column",minWidth:0}}><span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.descricao||"(sem descrição)"}</span>
+            <span className="muted" style={{fontSize:12}}>{fmtDate(m.dataMov)} · NUM. DOC. {m.numDoc}</span></span>
+          <span className="mono" style={{flexShrink:0,color:m.valor>0?"var(--ok)":"var(--ink)"}}>{fmtSinal(m.valor)}</span>
+        </div>)}
+        {porIdent.length>40&&<div className="muted" style={{fontSize:13,marginTop:6}}>e mais {porIdent.length-40}.</div>}
+        {porIdent.length>0&&<div className="muted" style={{fontSize:12,marginTop:6}}>Para ligar um movimento, edite o pagamento ou a despesa e escreva o NUM. DOC. em "Movimento do banco". A proposta automática chega na fase 3.</div>}
+      </div>}
       {itens.length>0&&<div>
-        <h3 style={{fontWeight:800,fontSize:15,marginBottom:6}}>Sem movimento do banco ({itens.length})</h3>
+        <h3 style={{fontWeight:800,fontSize:15,marginBottom:6}}>Registos da app sem movimento do banco ({itens.length})</h3>
         {itens.slice(0,40).map(x=><div key={x.tipo+x.r.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"6px 0",borderBottom:"1px solid var(--line-2)",fontSize:14}}>
           <span style={{display:"flex",flexDirection:"column",minWidth:0}}><span style={{fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{x.tipo} · {x.desc}</span>
             <span className="muted" style={{fontSize:12}}>{fmtDate(x.data)||"sem data"}{x.r.metodo?` · ${x.r.metodo}`:""}</span></span>

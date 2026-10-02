@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════════
    Constantes, formatação, API e cálculos partilhados
 ════════════════════════════════════════════════════════════════ */
-export const APP_VERSAO = "v7.5";
+export const APP_VERSAO = "v7.6";
 export const API_URL    = "https://script.google.com/macros/s/AKfycbyvN52wjCWtvSOMrRqszVtOZC1OfSnfciOSN1iANp-vH-Ap6wIgchYlUuIu9SUyQgUsVw/exec";
 
 export const MESES   = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -404,4 +404,70 @@ export function resumoConciliacao(appData, ate) {
   r.difs = lista.filter(([,m]) => Math.abs(m.soma - m.valor) > 0.5).map(([id,m]) => ({ id, ...m, dif: m.soma - m.valor }));
   r.dif = r.difs.reduce((s,x) => s + x.dif, 0);
   return r;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CONCILIAÇÃO — fase 2: extracto bancário
+═══════════════════════════════════════════════════════════════ */
+// Lê as linhas de um extracto .xlsx (formato "Movimentos" do banco: cabeçalho
+// DATA MOV. | DATA VALOR | PEDIDO NUM. | NUM. OPER. | NUM. DOC. | DESCRIÇÃO | VALOR | SALDO | MOEDA).
+// rows = array de linhas (cada uma um array de células). Devolve { movimentos, conta, erro }.
+const semAcentos = s => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
+const dataIso = v => {
+  if (v instanceof Date) return `${v.getUTCFullYear()}-${pad2(v.getUTCMonth()+1)}-${pad2(v.getUTCDate())}`;
+  const s = String(v ?? "").trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/); if (m) return `${m[3]}-${pad2(m[2])}-${pad2(m[1])}`;
+  return "";
+};
+const numero = v => typeof v === "number" ? v : parseFloat(String(v ?? "").replace(/\s/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", ".")) || 0;
+export function lerExtracto(rows) {
+  const iH = rows.findIndex(r => (r||[]).some(c => semAcentos(c) === "NUM. DOC.") && (r||[]).some(c => semAcentos(c) === "DESCRICAO"));
+  if (iH < 0) return { erro: "Não encontrei o cabeçalho do extracto (NUM. DOC., DESCRIÇÃO, VALOR…). Use o ficheiro \"Movimentos\" exportado do banco em .xlsx." };
+  const h = rows[iH].map(semAcentos), col = n => h.indexOf(n);
+  const c = { dataMov: col("DATA MOV."), dataValor: col("DATA VALOR"), pedido: col("PEDIDO NUM."), numOper: col("NUM. OPER."),
+    numDoc: col("NUM. DOC."), descricao: col("DESCRICAO"), valor: col("VALOR"), saldo: col("SALDO"), moeda: col("MOEDA") };
+  if ([c.dataMov, c.numDoc, c.descricao, c.valor].some(i => i < 0)) return { erro: "Faltam colunas no extracto (DATA MOV., NUM. DOC., DESCRIÇÃO e VALOR são obrigatórias)." };
+  const conta = rows.slice(0, iH).map(r => (r||[]).filter(x => x != null).join(" ")).find(t => /conta/i.test(t)) || "";
+  const movimentos = [];
+  rows.slice(iH + 1).forEach(r => {
+    if (!r || r.every(x => x == null || x === "")) return;
+    const numDoc = String(r[c.numDoc] ?? "").trim();
+    if (!numDoc) return;
+    movimentos.push({ ordem: movimentos.length, numDoc, dataMov: dataIso(r[c.dataMov]), dataValor: c.dataValor >= 0 ? dataIso(r[c.dataValor]) : "",
+      pedido: c.pedido >= 0 ? String(r[c.pedido] ?? "").trim() : "", numOper: c.numOper >= 0 ? String(r[c.numOper] ?? "").trim() : "",
+      descricao: String(r[c.descricao] ?? "").trim(), valor: numero(r[c.valor]), saldo: c.saldo >= 0 && r[c.saldo] != null && r[c.saldo] !== "" ? numero(r[c.saldo]) : null });
+  });
+  const docs = new Set(movimentos.map(m => m.numDoc));
+  if (docs.size !== movimentos.length) return { erro: "O extracto tem NUM. DOC. repetidos — não consigo identificar os movimentos com segurança." };
+  return { movimentos, conta };
+}
+
+// Identificadores antigos (EXT-AAAAMMDD-NNN = data + posição no ficheiro original) → NUM. DOC.
+// Só converte quando a data do id coincide com a do movimento nessa posição.
+export function mapaIdsAntigos(appData, movimentos) {
+  const ids = new Set();
+  [appData.pagamentosQuota, appData.pagamentosContribuicao, appData.despesas].forEach(l => (l||[]).forEach(r => { if (/^EXT-\d{8}-\d+$/.test(r.idMov||"")) ids.add(r.idMov); }));
+  const mapa = {}, falham = [];
+  ids.forEach(id => {
+    const [, d, n] = id.match(/^EXT-(\d{8})-(\d+)$/);
+    const m = movimentos[+n];
+    if (m && m.dataMov.replace(/-/g, "") === d) mapa[id] = m.numDoc; else falham.push(id);
+  });
+  return { mapa, falham, total: ids.size };
+}
+
+// Saldo do extracto no fim de um mês (aaaa-mm): saldo do último movimento até lá
+export function saldoExtracto(extracto, ate) {
+  const l = (extracto||[]).filter(m => m.saldo != null && (!ate || (m.dataMov||"").slice(0,7) <= ate));
+  if (!l.length) return null;
+  const u = l.reduce((a, b) => ((b.dataMov||"") >= (a.dataMov||"") ? b : a));   // a ordem do ficheiro desempata
+  return { saldo: u.saldo, data: u.dataMov };
+}
+
+// Movimentos do extracto sem nenhum registo da app ligado
+export function movimentosPorIdentificar(appData) {
+  const lig = new Set();
+  [appData.pagamentosQuota, appData.pagamentosContribuicao, appData.despesas].forEach(l => (l||[]).forEach(r => { if (r.idMov) lig.add(String(r.idMov)); }));
+  return (appData.extracto||[]).filter(m => !lig.has(String(m.numDoc)) && !(m.idAntigo && lig.has(m.idAntigo)));
 }

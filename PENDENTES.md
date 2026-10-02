@@ -3,6 +3,18 @@
 Lista de trabalho da app (Vercel, endereço oficial: bosch-app.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
+## 🧪 v7.6 (branch `beta`, ainda não no `main`) — conciliação com o banco, fase 2
+
+**Mexe no Apps Script:** colar o novo `Code.gs` e publicar *Nova versão*.
+
+- *Gestão → Conciliação → Importar extracto (.xlsx)*: lê o ficheiro "Movimentos" do banco no próprio navegador, mostra um resumo (movimentos novos, já importados, período, saldo final) e só grava ao confirmar.
+- Nova aba **"🏦 Extracto"** (criada na primeira importação): um movimento por linha, chave `num_doc` (NUM. DOC. do banco). Importar o mesmo ficheiro outra vez não duplica.
+- Na primeira importação, os `id_movimento` antigos (`EXT-AAAAMMDD-NNN`) passam a `NUM. DOC.` nas três abas (e no `referencia_doc` quando era igual); só quando a data do id coincide com a do movimento nessa posição. O id antigo fica guardado na aba Extracto (`id_antigo`).
+- Comparação com o **SALDO do extracto**: aviso no topo (igual / diferença) e coluna "Extracto" na tabela mês a mês.
+- Lista de **movimentos do extracto por identificar** (sem registo da app ligado). Para ligar à mão: editar o pagamento/despesa e escrever o NUM. DOC. em "Movimento do banco".
+- Nova dependência `read-excel-file` (0 vulnerabilidades), carregada só ao importar.
+- Testado com o extracto (407 movimentos, 407 ids convertíveis, saldo final 352 390) e a folha beta.
+
 ## 🧪 v7.5 (branch `beta`, ainda não no `main`) — conciliação com o banco, fase 1
 
 **Mexe no Apps Script:** colar o novo `Code.gs` na folha e publicar *Nova versão* (beta primeiro; real só antes do merge).
@@ -169,7 +181,7 @@ Próximos sugeridos: 1) A5, G5 (pequenos) · 2) C5, D2, F1 · 3) B3, E1–E4 · 
 - ✅ **A4. Estados coerentes em toda a app** (activo / inactivo / sem quota mensal) no painel, grelhas, relatórios, página pública e lembretes.
 - **A5. Multa por atraso** (`multa_atraso_pct`): calcular e mostrar separada da quota.
 - **A8. Conciliação com o banco — fases 2 e 3** (fase 1 na v7.5). Decisões tomadas: chave dos movimentos = `NUM. DOC.` do extracto (o `NUM. OPER.` não é único); livro de NIBs importado na fase 3 (de `Etapa2_Livro_de_IBANs_v3.xlsx`); canal com lista fixa; fracção 0 mantém os "recebimentos não identificados".
-  - **Fase 2 (~15–20% da v7):** importar o extracto (.xlsx "Movimentos", cabeçalho na linha 7) para uma aba "🏦 Extracto" sem duplicar; converter os `id_movimento` antigos (`EXT-AAAAMMDD-NNN`) para `NUM. DOC.`; lista de movimentos por identificar; comparação com o SALDO do extracto.
+  - ✅ **Fase 2 (feita na v7.6):** importar o extracto (.xlsx "Movimentos", cabeçalho na linha 7) para uma aba "🏦 Extracto" sem duplicar; converter os `id_movimento` antigos (`EXT-AAAAMMDD-NNN`) para `NUM. DOC.`; lista de movimentos por identificar; comparação com o SALDO do extracto.
   - **Fase 3 (~25–30% da v7):** aba "🔗 NIBs" (NIB/nome → apartamento ou grupo: 0/6/8/9, 4/5, 24/25, 26/27, 34/35) que a app aprende; propostas de correspondência (ligar a registos existentes, criar em falta, mostrar registos sem movimento), também para despesas.
 - **A7. Histórico do apartamento**: registar entradas e saídas de inquilinos (e mudanças de proprietário) com datas, e saber quem era o responsável em cada mês (para recibos, extractos e dívidas antigas). Por desenhar.
 - **A6. Data real da última alteração no cabeçalho público**: hoje "Actualizado …" mostra a hora da leitura (o script devolve `new Date()` em cada pedido), por isso aparece sempre a data do dia. Passar a mostrar quando a folha foi alterada pela última vez (data de modificação do ficheiro no Drive, inclui edições à mão) com o texto "Dados de …"; sem ligação continua "Sem ligação". Mexe no `Code.gs` (nova versão a publicar) e no cabeçalho; ~0,1–0,3 s a mais por leitura. Estimativa: ~3–4% da v7.
