@@ -1,6 +1,6 @@
 # Condomínio — Pendentes e histórico
 
-Lista de trabalho da app (Vercel: bosch-app-4xip.vercel.app) e do Apps Script
+Lista de trabalho da app (Vercel, endereço oficial: bosch-app.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
 ## 🧪 v7.3 (branch `beta`, ainda não no `main`) — título e cabeçalho da página pública
