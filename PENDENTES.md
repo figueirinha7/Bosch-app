@@ -3,7 +3,13 @@
 Lista de trabalho da app (Vercel: bosch-app-4xip.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
-## 🧪 v7.1 (branch `beta`, ainda não no `main`) — A3, A4, C3, D3
+## 🧪 v7.2 (branch `beta`, ainda não no `main`) — estatísticas de visitas
+
+- Vercel Web Analytics (`@vercel/analytics`): visitantes, páginas vistas, país, dispositivo e origem (ex.: WhatsApp). Sem cookies; o endereço vai sem parâmetros (não revela `?apt=` nem `?setup`).
+- Para funcionar: no Vercel, projecto → separador **Analytics** → **Enable**. Os dados aparecem nesse separador depois do merge para o `main`.
+- Só app; o Apps Script não muda.
+
+## ✅ v7.1 (no `main` desde 01/10/2026, PR #6) — A3, A4, C3, D3
 
 Só app: o Apps Script continua o da v7 (não é preciso publicar nada no Google).
 
@@ -135,8 +141,8 @@ Próximos sugeridos: 1) A5, G5 (pequenos) · 2) C5, D2, F1 · 3) B3, E1–E4 · 
 
 - ✅ **A1. Rever o "Em dívida (total)" do painel do gestor** (`src/Gestor.jsx`, `totQ`/`totC`): não se percebe de onde sai o valor (ex.: 1 930 000 Kz = Quotas 650 000 + Contribuições 1 280 000). Deve ser só dívida de quotas + dívida das contribuições **abertas**; confirmar que as fechadas não entram e mostrar o detalhe (tocar no cartão → lista por apartamento/contribuição).
 - ✅ **A2. Apartamentos inactivos** (`fracao_ativa`): devem aparecer como "Inactivo" (e não "Em dia") no separador Apartamentos do gestor e na grelha de Quotas da página pública; não devem gerar dívida nem contar em "A cobrar" / cobrança esperada. O Apps Script já envia `ativa`, falta a app usá-lo.
-- 🧪 **A3. Detalhe em todos os números do painel**: tocar em cobrança, saldo em caixa, despesas, etc. abre a lista que dá origem ao valor.
-- 🧪 **A4. Estados coerentes em toda a app** (activo / inactivo / sem quota mensal) no painel, grelhas, relatórios, página pública e lembretes.
+- ✅ **A3. Detalhe em todos os números do painel**: tocar em cobrança, saldo em caixa, despesas, etc. abre a lista que dá origem ao valor.
+- ✅ **A4. Estados coerentes em toda a app** (activo / inactivo / sem quota mensal) no painel, grelhas, relatórios, página pública e lembretes.
 - **A5. Multa por atraso** (`multa_atraso_pct`): calcular e mostrar separada da quota.
 
 ### B. Regras de quotas
@@ -149,7 +155,7 @@ Próximos sugeridos: 1) A5, G5 (pequenos) · 2) C5, D2, F1 · 3) B3, E1–E4 · 
 
 - ✅ **C1. Visão pessoal do morador** (mockups M0/M1 da revisão UI/UX): escolher o apartamento uma vez, ficar guardado no telemóvel (ou link `?apt=3B`) e abrir logo na situação pessoal — "login único e visão única".
 - ✅ **C2. Como pagar**: IBAN, titular, descritivo a usar e botão para enviar o comprovativo ao gestor (precisa de novos campos na aba ⚙️ Configurações).
-- 🧪 **C3. Aviso em destaque** no topo da página pública (último aviso dos últimos 30 dias).
+- ✅ **C3. Aviso em destaque** no topo da página pública (último aviso dos últimos 30 dias).
 - **C4. Instalar no telemóvel (PWA)**: `manifest.json` e ícone para "Adicionar ao ecrã principal".
 - **C5. Histórico pessoal**: o morador vê os pagamentos que fez e descarrega os recibos.
 
@@ -157,7 +163,7 @@ Próximos sugeridos: 1) A5, G5 (pequenos) · 2) C5, D2, F1 · 3) B3, E1–E4 · 
 
 - ✅ **D1. Recibo de pagamento** para imprimir ou enviar por WhatsApp depois de registar uma quota.
 - **D2. Anexar factura a despesas e comprovativo a pagamentos** (foto/PDF no Google Drive).
-- 🧪 **D3. Partilhar relatório em PDF directamente** (hoje: imprimir → Guardar como PDF → partilhar).
+- ✅ **D3. Partilhar relatório em PDF directamente** (hoje: imprimir → Guardar como PDF → partilhar).
 - **D4. Arquivo de documentos** na página pública: actas, regulamento, seguros, contratos.
 
 ### E. Finanças do condomínio
