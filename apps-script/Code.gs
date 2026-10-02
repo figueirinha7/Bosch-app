@@ -1,8 +1,13 @@
 // ═══════════════════════════════════════════════════════════════
-//  CONDOMÍNIO — Google Apps Script API  v7.7
+//  CONDOMÍNIO — Google Apps Script API  v7.8
 //  Cole este código em: script.google.com → projecto ligado ao Sheets
 //  Depois: Implementar → Gerir implementações → editar → Nova versão
 //          (Executar como: Eu · Acesso: Qualquer pessoa)
+//
+//  NOVO NA v7.8
+//  • As edições de quotas, pagamentos de contribuições e despesas aceitam
+//    também data_extrato, descricao_extrato e valor_movimento_kz (a app
+//    preenche-os do extracto quando o NUM. DOC. é escrito à mão).
 //
 //  NOVO NA v7.7 — CONCILIAÇÃO COM O BANCO (fase 3)
 //  • conciliar: grava de uma vez as propostas aceites pelo gestor — liga
@@ -89,7 +94,7 @@
 //  • Editar e apagar lançamentos (quotas, contribuições, despesas, avisos).
 // ═══════════════════════════════════════════════════════════════
 
-const VERSAO         = "v7.7";
+const VERSAO         = "v7.8";
 const SS             = SpreadsheetApp.getActiveSpreadsheet();
 const PROPS          = PropertiesService.getScriptProperties();
 const SESSAO_HORAS   = 8;   // duração de uma sessão de gestor
@@ -1102,7 +1107,7 @@ function executarAccao(action, data) {
 
     case "edit_pagamento_quota": {
       if (data.mes !== undefined) exigir(data.mes >= 1 && data.mes <= 12, "Mês inválido");
-      const row = editar("QUOTAS", data, ["fracao_numero", "data", "valor", "mes", "ano", "metodo", "referencia", "observacoes", "canal", "idMov", "notaRec"], validarAberto(data));
+      const row = editar("QUOTAS", data, ["fracao_numero", "data", "valor", "mes", "ano", "metodo", "referencia", "observacoes", "canal", "idMov", "notaRec", "dataExtrato", "descExtrato", "valorMov"], validarAberto(data));
       return { ok: true, row };
     }
 
@@ -1210,7 +1215,7 @@ function executarAccao(action, data) {
 
     case "edit_pagamento_contribuicao": {
       if (data.contribuicao_id !== undefined) data.contribuicao_titulo = contribPorId(data.contribuicao_id).titulo;
-      const row = editar("PGC", data, ["contribuicao_id", "contribuicao_titulo", "fracao_numero", "data", "valor", "metodo", "referencia", "observacoes", "canal", "idMov", "notaRec"], validarAberto(data));
+      const row = editar("PGC", data, ["contribuicao_id", "contribuicao_titulo", "fracao_numero", "data", "valor", "metodo", "referencia", "observacoes", "canal", "idMov", "notaRec", "dataExtrato", "descExtrato", "valorMov"], validarAberto(data));
       return { ok: true, row };
     }
 
@@ -1232,7 +1237,7 @@ function executarAccao(action, data) {
     }
 
     case "edit_despesa":
-      return { ok: true, row: editar("DESPESAS", data, ["data", "valor", "descricao", "categoria", "fornecedor", "numFatura", "observacoes", "canal", "idMov", "notaRec"], validarAberto(data)) };
+      return { ok: true, row: editar("DESPESAS", data, ["data", "valor", "descricao", "categoria", "fornecedor", "numFatura", "observacoes", "canal", "idMov", "notaRec", "dataExtrato", "descExtrato", "valorMov"], validarAberto(data)) };
 
     case "delete_despesa":
       return { ok: true, row: apagar("DESPESAS", data, validarAberto()) };

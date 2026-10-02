@@ -292,7 +292,14 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
   // Campos de conciliação de um registo (o original fica em _rec para só enviar o que mudou)
   const recForm = x => ({ canal:x.canal||"", idMov:x.idMov||"", notaRec:x.notaRec||"",
     _rec:{ canal:x.canal||"", idMov:x.idMov||"", notaRec:x.notaRec||"", dataExtrato:x.dataExtrato, descExtrato:x.descExtrato, valorMov:x.valorMov, confianca:x.confianca } });
-  const recAlterado = ()=>{ const o=form._rec||{}, d={}; ["canal","idMov","notaRec"].forEach(k=>{ if((form[k]||"")!==(o[k]||"")) d[k]=String(form[k]||"").trim(); }); return d; };
+  const recAlterado = ()=>{ const o=form._rec||{}, d={}; ["canal","idMov","notaRec"].forEach(k=>{ if((form[k]||"")!==(o[k]||"")) d[k]=String(form[k]||"").trim(); });
+    // Movimento escrito à mão: preenche data, descrição e valor a partir do extracto importado (e o canal Banco, se vazio)
+    if (d.idMov) {
+      const m = (appData.extracto||[]).find(x=>String(x.numDoc)===d.idMov || x.idAntigo===d.idMov);
+      if (m) { d.dataExtrato=m.dataMov; d.descExtrato=m.descricao; d.valorMov=Math.abs(m.valor); if(!form.canal) d.canal="Banco"; }
+    }
+    if (d.idMov==="" && o.idMov) { d.dataExtrato=""; d.descExtrato=""; d.valorMov=""; }
+    return d; };
   const abrirEditQuota = (p)=>{ const f=aptById(p.fracaoId); om("editQuota",{_row:p._row,_sig:p._sig,fracaoNum:f?.numero||"",mes:p.mes||mesAtual,ano:p.ano||anoAtual,data:p.data||today(),valor:p.valor,metodo:p.metodo||"",referencia:p.referencia||"",...recForm(p)}); };
   const abrirIsencao = (num, m)=> om("isentarMes",{fracaoNum:num||"",mesIni:m?.mes||mesAtual,anoIni:m?.ano||anoAtual,mesFim:m?.mes||mesAtual,anoFim:m?.ano||anoAtual});
   const abrirContrib = (c)=> c
@@ -1333,8 +1340,11 @@ export function GestorDashboard({appData, apiUrl, token, exp, onBack, onLogout, 
           <div className="muted" style={{fontSize:12,marginTop:-2,marginBottom:4}}>{rc.nMovs} movimentos do extracto · confirme que é o saldo que o banco mostra</div>
           {linha(`+ Entradas sem movimento (${rc.nEntradasSem})`, rc.entradasSem, {sinal:true})}
           {linha(`− Despesas sem movimento (${rc.nDespesasSem})`, -rc.despesasSem, {sinal:true})}
-          {rc.difs.length>0&&linha(`± Movimentos partilhados (${rc.difs.length})`, rc.dif, {sinal:true})}
-          {rc.difs.map(x=><div key={x.id} className="muted" style={{fontSize:12,paddingLeft:12}}>{x.id}: registos {fmtNum(x.soma)} para um movimento de {fmtNum(x.valor)}</div>)}
+          {rc.difs.length>0&&linha(`± Movimentos com valor diferente dos registos (${rc.difs.length})`, rc.dif, {sinal:true})}
+          {rc.difs.map(x=><div key={x.id} className="muted" style={{fontSize:12,paddingLeft:12,lineHeight:1.45,marginBottom:2}}>
+            <b>{x.id}</b>{x.data?` (${fmtDate(x.data)})`:""}: {x.n} {x.n===1?"registo":"registos"} somam {fmtNum(Math.abs(x.soma))}; o movimento do banco é de {fmtNum(Math.abs(x.valor))}{x.doExtracto?"":" (valor da folha — importe o extracto para confirmar)"}.
+            {x.gestorAnterior&&<> Quotas recebidas pelo gestor anterior: só depositou a diferença depois de pagar despesas em dinheiro (as "despesas sem movimento" acima).</>}
+          </div>)}
           <div className="divider" style={{margin:"4px 0"}}/>
           {linha("= Saldo da app", rc.app, {forte:true})}
         </div>

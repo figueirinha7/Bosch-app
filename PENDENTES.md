@@ -3,6 +3,14 @@
 Lista de trabalho da app (Vercel, endereço oficial: bosch-app.vercel.app) e do Apps Script
 (`apps-script/Code.gs`). Actualizar sempre que uma versão for publicada.
 
+## 🧪 v7.8 (branch `beta`, ainda não no `main`) — correcção da conciliação
+
+**Mexe no Apps Script:** colar o novo `Code.gs` e publicar *Nova versão*.
+
+- O valor e a data de cada movimento passam a vir do **extracto importado** (aba "🏦 Extracto"). Antes, quando o NUM. DOC. era escrito à mão, o painel usava o valor do primeiro registo e mostrava uma diferença falsa (ex.: 7 quotas de 5 000 ligadas a um movimento de 35 000 apareciam como "35 000 para um movimento de 5 000").
+- Ao escrever o NUM. DOC. à mão num pagamento ou despesa, a app preenche a data, a descrição e o valor do movimento a partir do extracto (e o canal Banco, se estiver vazio). O Apps Script passa a aceitar estes campos na edição.
+- Painel: "Movimentos com valor diferente dos registos", com nº de registos e explicação quando são quotas recebidas pelo gestor anterior (só depositou a diferença depois de pagar despesas em dinheiro).
+
 ## 🧪 v7.7 (branch `beta`, ainda não no `main`) — conciliação com o banco, fase 3
 
 **Mexe no Apps Script:** colar o novo `Code.gs` e publicar *Nova versão*.

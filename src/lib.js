@@ -1,7 +1,7 @@
 /* ════════════════════════════════════════════════════════════════
    Constantes, formatação, API e cálculos partilhados
 ════════════════════════════════════════════════════════════════ */
-export const APP_VERSAO = "v7.7";
+export const APP_VERSAO = "v7.8";
 export const API_URL    = "https://script.google.com/macros/s/AKfycbyvN52wjCWtvSOMrRqszVtOZC1OfSnfciOSN1iANp-vH-Ap6wIgchYlUuIu9SUyQgUsVw/exec";
 
 export const MESES   = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -382,7 +382,11 @@ export const temConciliacao = (appData) =>
 // (ex.: quotas pagas ao gestor anterior, todas ligadas a um único depósito).
 export function resumoConciliacao(appData, ate) {
   const dentro = (d) => !ate || (KEY_RE.test(d||"") ? d.slice(0,7) <= ate : true);
-  const movs = {};      // id → { data, valor (com sinal), soma dos registos (com sinal) }
+  const movs = {};      // id → { data, vm (valor_movimento_kz da 1.ª linha que o tenha, com sinal), soma dos registos, n, gestorAnterior }
+  // O valor e a data do movimento vêm do extracto importado sempre que possível (a linha pode não os ter,
+  // ex.: NUM. DOC. escrito à mão); sem extracto, usa valor_movimento_kz; sem esse, assume a soma dos registos.
+  const ext = new Map();
+  (appData.extracto||[]).forEach(m => { ext.set(String(m.numDoc), m); if (m.idAntigo) ext.set(String(m.idAntigo), m); });
   const r = { app:0, banco:0, entradasSem:0, despesasSem:0, nEntradasSem:0, nDespesasSem:0, cont:{conciliado:0,isento:0,fora:0,porConciliar:0} };
   const passa = (x, sinal, dataCaixa) => {
     const e = estadoConc(x); r.cont[e.k]++;
@@ -390,14 +394,21 @@ export function resumoConciliacao(appData, ate) {
     const v = sinal * (x.valor||0);
     r.app += v;
     if (x.idMov) {
-      const m = (movs[x.idMov] ||= { data: x.dataExtrato || dataCaixa, valor: sinal * (x.valorMov ?? x.valor ?? 0), soma: 0 });
-      m.soma += v;
+      const m = (movs[x.idMov] ||= { data: x.dataExtrato || dataCaixa, vm: null, soma: 0, n: 0, gestorAnterior: false });
+      if (m.vm == null && x.valorMov != null && x.valorMov !== "") m.vm = sinal * Math.abs(+x.valorMov);
+      m.soma += v; m.n++;
+      if (x.canal === "Gestor anterior") m.gestorAnterior = true;
     } else if (sinal > 0) { r.entradasSem += v; r.nEntradasSem++; }
     else { r.despesasSem += -v; r.nDespesasSem++; }
   };
   (appData.pagamentosQuota||[]).forEach(p => passa(p, 1, mesCaixaQuota(p)+"-01"));
   (appData.pagamentosContribuicao||[]).forEach(p => passa(p, 1, p.data));
   (appData.despesas||[]).forEach(d => passa(d, -1, d.data));
+  Object.entries(movs).forEach(([id, m]) => {
+    const e = ext.get(String(id));
+    if (e) { m.valor = e.valor; m.data = e.dataMov || m.data; m.doExtracto = true; }
+    else m.valor = m.vm != null ? m.vm : m.soma;
+  });
   const lista = Object.entries(movs).filter(([,m]) => dentro(m.data));
   r.banco = lista.reduce((s,[,m]) => s + m.valor, 0);
   r.nMovs = lista.length;
